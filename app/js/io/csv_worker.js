@@ -24,18 +24,33 @@ function postWorkerMessage(msg) {
   }
 }
 
-function loadcsv(data) {
-  if (data.viewOnly) return load_csv_view_only(data);
+const ReaderClass = typeof FileReader !== 'undefined' ? FileReader : class {
+  readAsArrayBuffer(blob) {
+    Promise.resolve(blob.arrayBuffer()).then(res => {
+      if (this.onloadend) this.onloadend({ target: { result: res } });
+    });
+  }
+  readAsText(blob) {
+    Promise.resolve(blob.text()).then(res => {
+      if (this.onloadend) this.onloadend({ target: { result: res } });
+    });
+  }
+};
+
+function loadcsv(data, postFn = postWorkerMessage) {
+  if (data.viewOnly) return load_csv_view_only(data, postFn);
   let file = data.file;
   let fileSize = file ? file.size : 0;
+  const readId = data.readId;
   const trimUnquoted = Boolean(data.trimUnquoted);
   const commentChar = data.commentChar || '';
   const escapeChar = data.escapeChar || '"';
   console.log("worker loading : ", file ? file.name : "unknown", "size:", fileSize);
 
   if (!file || fileSize === 0) {
-    postWorkerMessage({
+    postFn({
       cmd: "chunk_loaded",
+      readId: readId,
       status: 1.0,
       chunk: [[]],
       chunk_id: 1,
@@ -60,7 +75,7 @@ function loadcsv(data) {
   let parser = null;
 
   const textDecoder = (typeof TextDecoder !== 'undefined') ? new TextDecoder("utf-8", { fatal: false }) : null;
-  const reader = new FileReader();
+  const reader = new ReaderClass();
 
   reader.onloadend = e => {
     if (currentAbort) return;
@@ -99,8 +114,9 @@ function loadcsv(data) {
         firstChunkEmitted = true;
         const isComplete = isFileReadComplete && pendingOffset >= pendingRows.length;
 
-        postWorkerMessage({
+        postFn({
           cmd: "chunk_loaded",
+          readId: readId,
           status: isComplete ? 1.0 : currentStatus,
           chunk: firstChunkRows,
           chunk_id: iteration,
@@ -123,8 +139,9 @@ function loadcsv(data) {
       totalRowsEmitted += chunkRows.length;
       const isComplete = isFileReadComplete && pendingOffset >= pendingRows.length;
 
-      postWorkerMessage({
+      postFn({
         cmd: "chunk_loaded",
+        readId: readId,
         status: isComplete ? 1.0 : currentStatus,
         chunk: chunkRows,
         chunk_id: iteration,
@@ -166,13 +183,14 @@ function loadcsv(data) {
   seek();
 }
 
-function load_csv_view_only(data) {
+function load_csv_view_only(data, postFn = postWorkerMessage) {
   let file = data.file;
+  const readId = data.readId;
   console.log("reading chunk size : ", CHUNK_SIZE);
   console.log("worker loading view only : ", file ? file.name : "unknown");
   let fileSize = file ? file.size : 0;
   let sep = ',';
-  let reader = new FileReader();
+  let reader = new ReaderClass();
   let iteration = 0;
   let vo_n_chunks = data.n_chunks || 1;
   let vo_n_rows = data.n_rows || 100;
@@ -209,8 +227,9 @@ function load_csv_view_only(data) {
       matrix.unshift(ellipsisRow);
     }
 
-    postWorkerMessage({
+    postFn({
       cmd: "chunk_loaded",
+      readId: readId,
       status: status,
       chunk: matrix,
       chunk_id: iteration,

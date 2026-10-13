@@ -24,68 +24,28 @@ window.addEventListener('beforeunload', function (e) {
 });
 
 
-let launchFileOnInitDone = function () {
-  if ('launchQueue' in window && typeof window.launchQueue?.setConsumer === 'function') {
-    try {
-      window.launchQueue.setConsumer(async (params) => {
-        const [handle] = params.files;
-        if (handle) getCsvHandle()?.launchFile(handle);
-      });
-    } catch (err) {
-      console.warn('LaunchQueue setup failed:', err);
-    }
-  }
-
-  window.addEventListener('message', (event) => {
-    if (event.data && event.data.fileHandle) getCsvHandle()?.launchFile(event.data.fileHandle);
-  });
-};
-
-let initDragAndDrop = function () {
-  if (typeof window === 'undefined') return;
-  window.addEventListener('dragover', (e) => {
-    e.preventDefault();
-  });
-  window.addEventListener('dragenter', (e) => {
-    e.preventDefault();
-  });
-  window.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-  });
-  window.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      const csvHandle = getCsvHandle();
-      if (csvHandle) {
-        document.title = file.name;
-        csvHandle.file = file;
-        csvHandle.handle = null;
-        csvHandle.read(file);
-      }
-    }
-  });
-};
-
-let nanocell_cleanStart = function () {
-  setCsvHandle(new CsvHandle());
+export function nanocell_cleanStart() {
+  const csvHandle = new CsvHandle();
+  setCsvHandle(csvHandle);
   Setting.init();
   AppLayout.init();
+  Setting.runAll();
   buildMenu();
   buildKeys();
   new Sheet(new Dataframe([["Hello World"]]));
-  Setting.runAll();
-  launchFileOnInitDone();
-  initDragAndDrop();
+  csvHandle.initListeners();
   if (!env.supportsFileSystemAccess) {
     showBrowserCompatibilityNotice();
   }
-};
+}
 
-window.addEventListener('DOMContentLoaded', () => {
-  nanocell_cleanStart();
-});
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', () => nanocell_cleanStart(), { once: true });
+  } else {
+    nanocell_cleanStart();
+  }
+}
 export function handleSWUpdatePrompt(updateSWFn = updateSW) {
   const currentSheet = getSheet();
   const hasUnsaved = currentSheet?.df && !currentSheet.df.isSaved;

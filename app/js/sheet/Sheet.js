@@ -7,7 +7,9 @@ import { stg } from '../ui/settings/Setting.js';
 import { SheetView } from './SheetView.js';
 import { SheetController } from './SheetController.js';
 
-class Sheet extends HTMLElement {
+const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
+
+class Sheet extends BaseElement {
   constructor(df = new Dataframe()) {
     super();
     this.df = df;
@@ -43,7 +45,10 @@ class Sheet extends HTMLElement {
     const container = dom?.mainContainer || document.getElementById("main-container");
     if (container) {
       container.querySelectorAll('ui-sheet, #sheet').forEach(el => {
-        if (el !== this) el.remove();
+        if (el !== this) {
+          if (typeof el.disconnectedCallback === 'function') el.disconnectedCallback();
+          el.remove();
+        }
       });
       if (this.parentNode !== container) {
         container.appendChild(this);
@@ -154,9 +159,20 @@ class Sheet extends HTMLElement {
   startCoordEdit() { return this.view.startCoordEdit(); }
   refresh() { return this.view.refresh(); }
   reload() { return this.view.reload(); }
+
+  disconnectedCallback() {
+    if (this.view?._refreshRafId && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.view._refreshRafId);
+      this.view._refreshRafId = null;
+    }
+    if (this.selection?._slctRafId && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.selection._slctRafId);
+      this.selection._slctRafId = null;
+    }
+  }
 }
 
-if (!customElements.get('ui-sheet')) {
+if (typeof customElements !== 'undefined' && !customElements.get('ui-sheet')) {
   customElements.define('ui-sheet', Sheet);
 }
 

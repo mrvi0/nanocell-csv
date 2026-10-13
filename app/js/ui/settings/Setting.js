@@ -26,7 +26,7 @@ class Setting {
   constructor(s) {
     let stored_val = null;
     try {
-      stored_val = (typeof localStorage !== 'undefined') ? localStorage.getItem(s.key) : null;
+      stored_val = (typeof window !== 'undefined' && typeof localStorage !== 'undefined') ? localStorage.getItem(s.key) : null;
     } catch (e) {
       console.warn('localStorage access failed:', e);
     }
@@ -38,7 +38,7 @@ class Setting {
     // Migrate legacy default of 100 Mo down to modern 10 Mo default
     if (s.key === "editMaxFileSize" && (stored_val === 100 || stored_val === "100")) {
       stored_val = s.dflt;
-      try { localStorage.setItem("editMaxFileSize", String(s.dflt)); } catch {}
+      try { if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') localStorage.setItem("editMaxFileSize", String(s.dflt)); } catch {}
     }
     this.key = s.key;
     if (stored_val !== null) {
@@ -55,7 +55,7 @@ class Setting {
       set: (e) => {
         this.value = e;
         try {
-          if (typeof localStorage !== 'undefined') localStorage.setItem(this.key, e);
+          if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') localStorage.setItem(this.key, e);
         } catch (err) {
           console.warn('localStorage set failed:', err);
         }
@@ -110,8 +110,8 @@ Object.defineProperty(Setting, 'list', {
         b.style.fontSize = n + "px";
       }
     } },
-    { key: "rows", dflt: 25, name: "Rows", min: 10, max: 60, cb: n => { const s = getSheet(); if (s) s.reload(); } },
-    { key: "cols", dflt: 7, name: "Cols", min: 3, max: 30, cb: n => { const s = getSheet(); if (s) s.reload(); } },
+    { key: "rows", dflt: 25, name: "Rows", min: 10, max: 60, cb: n => { const s = getSheet(); s?.reload?.(); } },
+    { key: "cols", dflt: 7, name: "Cols", min: 3, max: 30, cb: n => { const s = getSheet(); s?.reload?.(); } },
     { key: "actionBar", dflt: true, name: "Action Bar", cb: b => {
       const header = (dom && dom.header) || (typeof document !== 'undefined' && (document.getElementById('header') || document.querySelector('header')));
       if (header) {
@@ -122,7 +122,7 @@ Object.defineProperty(Setting, 'list', {
       const s = getSheet();
       if (s && typeof s.scrollbarRefresh === 'function') s.scrollbarRefresh();
     } },
-    { key: "purple", dflt: true, name: "Warning color on line return, comma and double quote values", cb: b => { const s = getSheet(); if (s) s.reload(); } },
+    { key: "purple", dflt: true, name: "Warning color on line return, comma and double quote values", cb: b => { const s = getSheet(); s?.reload?.(); } },
 
     { title: "Csv Save" },
     { key: "encoding", dflt: "utf-8", name: "Encoding" },

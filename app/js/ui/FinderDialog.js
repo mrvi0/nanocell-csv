@@ -4,7 +4,9 @@ import { getSheet } from '../appContext.js';
 import { setIcon } from '../utils/icons.js';
 import { SearchEngine } from '../../../core/search/SearchEngine.js';
 
-class FinderDialog extends HTMLElement {
+const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
+
+class FinderDialog extends BaseElement {
   constructor(sheet) {
     super();
     this.sheet = sheet;
@@ -288,7 +290,7 @@ class FinderDialog extends HTMLElement {
   }
 }
 
-if (!customElements.get('ui-finder')) {
+if (typeof customElements !== 'undefined' && !customElements.get('ui-finder')) {
   customElements.define('ui-finder', FinderDialog);
 }
 

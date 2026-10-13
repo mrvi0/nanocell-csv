@@ -10,7 +10,9 @@ import { setIcon } from '../utils/icons.js';
 import { Notification } from './Notification.js';
 import { NumInput } from './controls/NumInput.js';
 
-class FilterDialog extends HTMLElement {
+const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
+
+class FilterDialog extends BaseElement {
   constructor(sheet) {
     super();
     this.sheet = sheet;
@@ -255,7 +257,7 @@ class FilterDialog extends HTMLElement {
   }
 }
 
-if (!customElements.get('ui-filter')) {
+if (typeof customElements !== 'undefined' && !customElements.get('ui-filter')) {
   customElements.define('ui-filter', FilterDialog);
 }
 

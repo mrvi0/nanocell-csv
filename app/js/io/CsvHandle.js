@@ -17,17 +17,26 @@ import CsvWorker from './csv_worker.js?worker';
 class CsvHandle {
   /**
    * Instantiates a new CsvHandle and sets up the Web Worker event listener if available.
+   * @param {Object} [options={}] - Optional overrides for window, document, worker, and sheet factory.
    */
-  constructor() {
+  constructor(options = {}) {
+    this.win = options.window !== undefined ? options.window : (typeof window !== 'undefined' ? window : null);
+    this.doc = options.document !== undefined ? options.document : (typeof document !== 'undefined' ? document : null);
+    this.createSheet = options.createSheet || ((df) => new Sheet(df));
     this.handle = null;
     this.file = null;
     this.file_chunks = [];
     this.isFirstChunkLoaded = false;
+    this.isReadComplete = false;
     this.viewOnly = false;
-    this.worker = typeof Worker !== 'undefined' ? new CsvWorker() : null;
+    this.readId = 0;
+    this._launchingHandle = null;
+    this._receivedMessageHandle = null;
+    this.worker = options.worker !== undefined ? options.worker : (typeof Worker !== 'undefined' ? new CsvWorker() : null);
     if (this.worker) {
       this.worker.addEventListener("message", e => {
-        let d = e.data;
+        let d = e?.data;
+        if (!d) return;
         switch (d.cmd) {
           case "chunk_loaded": this.file_chunk_loaded(d);
         }
@@ -36,16 +45,99 @@ class CsvHandle {
   }
 
   /**
+   * Loads a File object into the sheet, updating the active file handle and window title.
+   * @param {File} file - The File object to read.
+   * @param {FileSystemFileHandle|null} [handle=null] - Associated FileSystemFileHandle if available.
+   */
+  loadFile(file, handle = null) {
+    if (!file) return;
+    this.handle = handle;
+    this.file = file;
+    if (this.doc) {
+      this.doc.title = file.name || 'csv';
+    }
+    console.log("Loading : ", file.name);
+    this.read(file);
+  }
+
+  /**
    * Initializes file loading from a FileSystemFileHandle.
    * @param {FileSystemFileHandle} handle - The file handle to load.
    * @returns {Promise<void>}
    */
   async launchFile(handle) {
-    this.handle = handle;
-    this.file = await handle.getFile();
-    document.title = this.file.name;
-    console.log("Loading : ", this.file.name);
-    this.read(this.file);
+    if (!handle || typeof handle.getFile !== 'function') return;
+    if (this._launchingHandle === handle) return;
+    this._launchingHandle = handle;
+    try {
+      const file = await handle.getFile();
+      this.loadFile(file, handle);
+    } finally {
+      this._launchingHandle = null;
+    }
+  }
+
+  /**
+   * Registers all window-level file opening listeners: PWA launchQueue, cross-window postMessage
+   * with opener ready handshake, and drag-and-drop (with FileSystemFileHandle preservation).
+   * @param {Window} [win=this.win] - Target window object.
+   */
+  initListeners(win = this.win) {
+    if (!win) return;
+
+    if ('launchQueue' in win && typeof win.launchQueue?.setConsumer === 'function') {
+      try {
+        win.launchQueue.setConsumer(async (params) => {
+          const handle = params?.files?.[0];
+          if (handle) await this.launchFile(handle);
+        });
+      } catch (err) {
+        console.warn('LaunchQueue setup failed:', err);
+      }
+    }
+
+    if (typeof win.addEventListener === 'function') {
+      win.addEventListener('message', (event) => {
+        const fileHandle = event?.data?.fileHandle;
+        if (fileHandle && fileHandle !== this._receivedMessageHandle) {
+          this._receivedMessageHandle = fileHandle;
+          this.launchFile(fileHandle);
+        }
+      });
+
+      win.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+      win.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+      });
+      win.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+      });
+      win.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        const item = e.dataTransfer?.items?.[0];
+        if (item && typeof item.getAsFileSystemHandle === 'function') {
+          try {
+            const handle = await item.getAsFileSystemHandle();
+            if (handle && (handle.kind === 'file' || typeof handle.getFile === 'function')) {
+              await this.launchFile(handle);
+              return;
+            }
+          } catch {}
+        }
+        const file = e.dataTransfer?.files?.[0];
+        if (file) {
+          this.loadFile(file, null);
+        }
+      });
+    }
+
+    if (win.opener && typeof win.opener.postMessage === 'function') {
+      try {
+        win.opener.postMessage({ type: 'nanocell:ready' }, '*');
+      } catch {}
+    }
   }
 
   /**
@@ -54,7 +146,10 @@ class CsvHandle {
    * @param {Object} d - Worker event payload.
    */
   file_chunk_loaded(d) {
-    const fc = document.getElementById("footerCenter");
+    if (d.readId !== undefined && d.readId !== this.readId) {
+      return;
+    }
+    const fc = this.doc && typeof this.doc.getElementById === 'function' ? this.doc.getElementById("footerCenter") : null;
     const percent = Math.round(d.status * 100);
     if (fc) fc.innerHTML = percent + "%";
 
@@ -68,13 +163,14 @@ class CsvHandle {
       this.isFirstChunkLoaded = true;
       let matrix = d.chunk || [[]];
       let df = new Dataframe(matrix);
-      let s = new Sheet(df);
+      let s = this.createSheet(df);
 
       s.df.isSaved = true;
       s.df.lock = this.viewOnly;
       s.fixTop = stg.set_headers;
 
       if (d.status >= 1 || d.isComplete) {
+        this.isReadComplete = true;
         this.readSuccess(s, d);
       }
       return;
@@ -96,6 +192,7 @@ class CsvHandle {
     }
 
     if (d.status >= 1 || d.isComplete) {
+      this.isReadComplete = true;
       if (s) {
         this.readSuccess(s, d);
       }
@@ -130,9 +227,15 @@ class CsvHandle {
    * @param {File} file - File object to read.
    */
   read(file) {
+    if (this.worker && this.readId > 0 && !this.isReadComplete) {
+      this.pipe("abort", {});
+    }
+    this.readId = (this.readId || 0) + 1;
+    const currentReadId = this.readId;
     this.file = file;
     this.file_chunks = [];
     this.isFirstChunkLoaded = false;
+    this.isReadComplete = false;
     let mbSize = (file && file.size) ? file.size / 1000000 : 0;
     this.viewOnly = mbSize > Number(stg.editMaxFileSize);
 
@@ -140,6 +243,7 @@ class CsvHandle {
       this.file_chunks = [[[]]];
       this.file_chunk_loaded({
         cmd: "chunk_loaded",
+        readId: currentReadId,
         status: 1.0,
         chunk: [[]],
         chunk_id: 1,
@@ -149,6 +253,7 @@ class CsvHandle {
       });
     } else {
       this.pipe("read", {
+        readId: currentReadId,
         file: file,
         viewOnly: this.viewOnly,
         n_chunks: stg.vo_n_chunks,
@@ -170,24 +275,22 @@ class CsvHandle {
    * Fallback file picker using standard hidden file input for browsers without File System Access API.
    */
   openFallback() {
-    if (typeof document === 'undefined') return;
-    const input = document.createElement('input');
+    const doc = this.doc;
+    if (!doc || typeof doc.createElement !== 'function') return;
+    const input = doc.createElement('input');
     input.type = 'file';
     input.accept = '.csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain';
     input.style.display = 'none';
     input.onchange = (e) => {
       const file = e.target?.files?.[0];
       if (file) {
-        document.title = file.name;
-        this.file = file;
-        this.handle = null;
         console.log("Loading via fallback:", file.name);
-        this.read(file);
+        this.loadFile(file, null);
       }
-      input.remove();
+      input.remove?.();
     };
-    document.body.appendChild(input);
-    input.click();
+    doc.body?.appendChild(input);
+    input.click?.();
   }
 
   /**
@@ -196,26 +299,38 @@ class CsvHandle {
    * @returns {Promise<void>}
    */
   async open() {
-    if (typeof window === 'undefined' || typeof window.showOpenFilePicker !== 'function') {
+    const win = this.win;
+    if (!win || typeof win.showOpenFilePicker !== 'function') {
       showBrowserCompatibilityNotice();
       this.openFallback();
       return;
     }
     try {
-      let [fileHandle] = await window.showOpenFilePicker(CsvHandle.pickerOptions);
-      const newWindow = window.open('./home.html', "_blank", 'width=800,height=600');
+      let [fileHandle] = await win.showOpenFilePicker(CsvHandle.pickerOptions);
+      const newWindow = typeof win.open === 'function' ? win.open('./home.html', "_blank", 'width=800,height=600') : null;
       if (!newWindow) {
         // Fall back to opening in the current window if popup was blocked or in standalone mode
-        this.launchFile(fileHandle);
+        await this.launchFile(fileHandle);
         return;
       }
-      const channel = new MessageChannel();
+      const sendHandle = () => {
+        try {
+          newWindow.postMessage({ fileHandle }, '*');
+        } catch {}
+      };
+      const onReadyMessage = (event) => {
+        if (event?.data?.type === 'nanocell:ready' && (!event.source || event.source === newWindow)) {
+          win.removeEventListener?.('message', onReadyMessage);
+          sendHandle();
+        }
+      };
+      win.addEventListener?.('message', onReadyMessage);
       newWindow.onload = () => {
-        newWindow.postMessage({ fileHandle }, '*', [channel.port2]);
+        sendHandle();
       };
     } catch (err) {
       if (err.name === 'AbortError') return;
-      if (err instanceof TypeError || typeof window.showOpenFilePicker !== 'function') {
+      if (err instanceof TypeError || typeof win.showOpenFilePicker !== 'function') {
         showBrowserCompatibilityNotice();
         this.openFallback();
         return;
@@ -229,19 +344,27 @@ class CsvHandle {
    * @param {boolean} [force=false] - If true, reloads without prompting even if unsaved changes exist.
    */
   reloadFile(force = false) {
-    if (this.handle === null) return Notification.quick("No file to reload from.");
+    if (this.handle === null && this.file === null) {
+      return Notification.quick("No file to reload from.");
+    }
+    const doReload = () => {
+      if (this.handle !== null) {
+        return this.launchFile(this.handle);
+      }
+      return this.loadFile(this.file, null);
+    };
     const sheet = getSheet();
     if (sheet && !sheet.df.isSaved && !force) {
-      Notification.choice("Changes will be lost ? ", () => { this.launchFile(this.handle); });
+      return Notification.choice("Changes will be lost ? ", doReload);
     } else {
-      this.launchFile(this.handle);
+      return doReload();
     }
   }
 
   /**
    * Opens a blank NanoCell window.
    */
-  new() { window.open('./home.html', "_blank", 'width=600,height=400'); }
+  new() { this.win?.open?.('./home.html', "_blank", 'width=600,height=400'); }
 
   /**
    * Triggers the native save file picker dialog to save the current dataset under a new file path.
@@ -250,17 +373,18 @@ class CsvHandle {
    */
   async saveAs() {
     if (this.viewOnly) return;
-    if (typeof window === 'undefined' || typeof window.showSaveFilePicker !== 'function') {
+    const win = this.win;
+    if (!win || typeof win.showSaveFilePicker !== 'function') {
       showBrowserCompatibilityNotice();
       this.exportDownload();
       return;
     }
     try {
-      this.handle = await window.showSaveFilePicker(CsvHandle.pickerOptions);
-      this.save();
+      this.handle = await win.showSaveFilePicker(CsvHandle.pickerOptions);
+      await this.save();
     } catch (err) {
       if (err.name === 'AbortError') return;
-      if (err instanceof TypeError || typeof window.showSaveFilePicker !== 'function') {
+      if (err instanceof TypeError || typeof win.showSaveFilePicker !== 'function') {
         showBrowserCompatibilityNotice();
         this.exportDownload();
         return;
@@ -276,7 +400,7 @@ class CsvHandle {
   async save() {
     if (this.viewOnly) return;
     if (this.handle === null) {
-      this.saveAs();
+      await this.saveAs();
       return;
     }
     if (typeof this.handle?.createWritable !== 'function') {
@@ -292,9 +416,9 @@ class CsvHandle {
       await writableStream.write(csvContent);
       await writableStream.close();
       sheet.df.isSaved = true;
-      sheet.refresh();
+      sheet.refresh?.();
       this.file = await this.handle.getFile();
-      document.title = this.file.name;
+      if (this.doc) this.doc.title = this.file.name;
     } catch (err) {
       console.error("Error saving file:", err);
       Notification.confirm(err);
@@ -309,6 +433,8 @@ class CsvHandle {
   exportDownload(blob, filename) {
     const sheet = getSheet();
     if (!sheet) return;
+    const doc = this.doc;
+    if (!doc) return;
     try {
       if (!blob) {
         const csvContent = CsvHandle.from2D(sheet.df.data);
@@ -318,18 +444,18 @@ class CsvHandle {
         filename = (this.file && this.file.name) ? this.file.name : 'export.csv';
       }
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = doc.createElement('a');
       a.href = url;
       a.download = filename;
       a.style.display = 'none';
-      document.body.appendChild(a);
+      doc.body.appendChild(a);
       a.click();
       setTimeout(() => {
         URL.revokeObjectURL(url);
         a.remove();
       }, 100);
       sheet.df.isSaved = true;
-      sheet.refresh();
+      sheet.refresh?.();
       Notification.quick("File saved as " + filename);
     } catch (err) {
       console.error("Error downloading file:", err);

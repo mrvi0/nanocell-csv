@@ -11,11 +11,14 @@ function sanitizeHtml(html) {
     .replace(/href\s*=\s*(?:'javascript:[^']*'|"javascript:[^"]*"|javascript:[^\s>]+)/gi, '');
 }
 
-class Notification extends HTMLElement {
+const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
+
+class Notification extends BaseElement {
   constructor(txt = "Empty message", opt = {}) {
     super();
     this.txt = txt;
     this.opt = typeof opt === 'number' ? { t: opt } : (opt || {});
+    if (typeof document === 'undefined') return;
 
     this.content = document.createElement("div");
     this.content.className = "ui-msg-text";
@@ -136,8 +139,9 @@ class Notification extends HTMLElement {
   }
 
   show() {
+    if (typeof document === 'undefined') return this;
     let container = document.getElementById('ui-toast-container');
-    if (!container && typeof document !== 'undefined') {
+    if (!container) {
       container = document.createElement('div');
       container.id = 'ui-toast-container';
       container.className = 'ui-toast-container';
@@ -208,7 +212,7 @@ class Notification extends HTMLElement {
 
   dismiss() {
     if (this.timer) clearTimeout(this.timer);
-    this.classList.add('ui-msg-closing');
+    this.classList?.add('ui-msg-closing');
     setTimeout(() => {
       if (this.parentNode) {
         this.remove();
@@ -227,7 +231,7 @@ class Notification extends HTMLElement {
   static error(txt, title = 'Error') { const m = new Notification(txt, { id: 2, type: 'error', title }); return m.show(); }
 }
 
-if (!customElements.get('ui-msg')) {
+if (typeof customElements !== 'undefined' && !customElements.get('ui-msg')) {
   customElements.define('ui-msg', Notification);
 }
 
