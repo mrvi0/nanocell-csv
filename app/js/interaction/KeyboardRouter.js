@@ -12,38 +12,36 @@ let activeKeyUpHandler = null;
 let activeCopyHandler = null;
 let activeCutHandler = null;
 let activePasteHandler = null;
+let shortcutMap = null;
 
 function getShortcutKey(key, ctrl, shift, alt) {
   return `${ctrl ? 1 : 0}:${shift ? 1 : 0}:${alt ? 1 : 0}:${String(key).toUpperCase()}`;
 }
 
-let shortcutMap = null;
 function getShortcutMap() {
   if (!shortcutMap) {
     shortcutMap = new Map();
     for (const c of Object.values(cmd)) {
       if (!c.k || typeof c.run !== 'function') continue;
       const keyUpper = String(c.k).toUpperCase();
-      const ctrl = Boolean(c.ctrl);
-      const shift = Boolean(c.shift);
-      const alt = Boolean(c.alt);
+      const ctrl = Boolean(c.ctrl), shift = Boolean(c.shift), alt = Boolean(c.alt);
       shortcutMap.set(getShortcutKey(keyUpper, ctrl, shift, alt), c);
-      if (c.k !== keyUpper) {
-        shortcutMap.set(getShortcutKey(c.k, ctrl, shift, alt), c);
-      }
+      if (c.k !== keyUpper) shortcutMap.set(getShortcutKey(c.k, ctrl, shift, alt), c);
     }
-    if (cmd.delete) {
-      shortcutMap.set(getShortcutKey('DELETE', false, false, false), cmd.delete);
-    }
-    if (cmd.redo) {
-      shortcutMap.set(getShortcutKey('Y', true, false, false), cmd.redo);
-    }
-    if (cmd.shortcuts) {
-      shortcutMap.set(getShortcutKey('K', true, false, false), cmd.shortcuts);
-    }
+    if (cmd.delete) shortcutMap.set(getShortcutKey('DELETE', false, false, false), cmd.delete);
+    if (cmd.redo) shortcutMap.set(getShortcutKey('Y', true, false, false), cmd.redo);
+    if (cmd.shortcuts) shortcutMap.set(getShortcutKey('K', true, false, false), cmd.shortcuts);
   }
   return shortcutMap;
 }
+
+const PREVENT_DFLT_KEYS = new Set([
+  'H', 'N', 'T', 'F', 'O', 'P', 'M', 'S', 'R', 'G', 'K',
+  'A', 'B', 'D', 'E', 'L', 'Z', 'Y', 'Q', ';', 'BACKSPACE'
+]);
+
+const isInputElement = (el) =>
+  Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
 
 export function buildKeys() {
   shortcutMap = null;
@@ -55,215 +53,131 @@ export function buildKeys() {
     if (activePasteHandler) document.removeEventListener('paste', activePasteHandler);
   }
 
-  // Prevent browser default actions for registered app shortcuts
-  const prevent_dflt_list = [
-    'H', 'N', 'T', 'F', 'O', 'P', 'M', 'S', 'R', 'G', 'K',
-    'A', 'B', 'D', 'E', 'L', 'Z', 'Y', 'Q', ';', 'BACKSPACE'
-  ];
-
-  const onKeyDown = function (e) {
+  activeKeyDownHandler = (e) => {
     let k = e.key.toUpperCase();
     const ctrlDown = e.metaKey || e.ctrlKey;
-    let alt = e.altKey;
+    const alt = e.altKey;
     const shift = e.shiftKey;
-    const meta = e.metaKey;
     const activeSheet = getSheet();
 
-    // Determine current active interaction context
     const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
-    const isCellInput = Boolean(activeSheet && activeSheet.inputing && activeEl === activeSheet.inputField);
+    const isCellInput = Boolean(activeSheet?.inputing && activeEl === activeSheet.inputField);
     const inCommandPalette = Boolean(
-      (activeEl && typeof activeEl.closest === 'function' && activeEl.closest('ui-command-palette')) ||
-      (dom?.palette && Boolean(dom.palette.isOpen)) ||
-      (typeof document !== 'undefined' && Boolean(document.querySelector('ui-command-palette')?.isOpen))
+      activeEl?.closest?.('ui-command-palette') ||
+      dom?.palette?.isOpen ||
+      (typeof document !== 'undefined' && document.querySelector('ui-command-palette')?.isOpen)
     );
     const inDialog = Boolean(DialogManager.isBusy);
-    const inFinder = Boolean(activeEl && typeof activeEl.closest === 'function' && activeEl.closest('ui-finder'));
-    const inFilter = Boolean(activeEl && typeof activeEl.closest === 'function' && activeEl.closest('ui-filter'));
+    const inFinder = Boolean(activeEl?.closest?.('ui-finder'));
+    const inFilter = Boolean(activeEl?.closest?.('ui-filter'));
     const validationPane = dom?.validationPane || (typeof document !== 'undefined' ? (document.getElementById('validation-pane') || document.querySelector('ui-validation-pane')) : null);
-    const inValidationPane = Boolean(validationPane && validationPane.isOpen);
-    const isOtherInput = Boolean(
-      activeEl &&
-      (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.isContentEditable) &&
-      !isCellInput
-    );
+    const inValidationPane = Boolean(validationPane?.isOpen);
+    const isOtherInput = isInputElement(activeEl) && !isCellInput;
 
-    // Prevent default for registered Ctrl commands on the page
-    if (ctrlDown && (prevent_dflt_list.includes(k) || prevent_dflt_list.includes(e.key))) {
-      // Don't prevent Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+A, Ctrl+Z inside other inputs
+    if (ctrlDown && (PREVENT_DFLT_KEYS.has(k) || PREVENT_DFLT_KEYS.has(e.key))) {
       if (!(isOtherInput || isCellInput) || (k !== 'C' && k !== 'V' && k !== 'X' && k !== 'A' && k !== 'Z')) {
         e.preventDefault();
       }
     }
 
-    // Context 1: Command Palette handling
     if (inCommandPalette) {
-      if (k === "ESCAPE") {
-        const palette = document.getElementById('palette') || document.querySelector('ui-command-palette');
-        if (palette && typeof palette.close === 'function') palette.close();
-        return;
+      if (k === 'ESCAPE') {
+        (document.getElementById('palette') || document.querySelector('ui-command-palette'))?.close?.();
       }
       return;
     }
 
-    // Open/Toggle Command Palette (Ctrl+P or Ctrl+K)
-    if (ctrlDown && (k === "P" || k === "K") && !shift && !alt) {
+    if (ctrlDown && (k === 'P' || k === 'K') && !shift && !alt) {
       e.preventDefault();
-      if (cmd.shortcuts?.run) {
-        cmd.shortcuts.run();
-      } else {
-        const palette = document.getElementById('palette') || document.querySelector('ui-command-palette');
-        if (palette && typeof palette.toggle === 'function') palette.toggle();
-      }
+      if (cmd.shortcuts?.run) cmd.shortcuts.run();
+      else (document.getElementById('palette') || document.querySelector('ui-command-palette'))?.toggle?.();
       return;
     }
 
-    // Context 2: Modal Dialog handling
     if (inDialog) {
-      if (k === "ESCAPE") {
-        e.preventDefault();
-        DialogManager.close();
-        return;
-      }
+      if (k === 'ESCAPE') { e.preventDefault(); DialogManager.close(); }
       return;
     }
 
-    // Context 3: Floating Finder handling
     if (inFinder) {
-      if (k === "ESCAPE") {
-        e.preventDefault();
-        const finderEl = activeEl.closest('ui-finder');
-        if (finderEl && typeof finderEl.close === 'function') finderEl.close();
-        return;
-      }
-      // Allow Ctrl+F or Ctrl+Shift+F to refocus/toggle find while in finder
-      if (ctrlDown && k === "F") {
-        e.preventDefault();
-        if (activeSheet) activeSheet.find(shift);
-        return;
-      }
+      if (k === 'ESCAPE') { e.preventDefault(); activeEl.closest('ui-finder')?.close?.(); }
+      else if (ctrlDown && k === 'F') { e.preventDefault(); activeSheet?.find(shift); }
       return;
     }
 
-    // Context 3.2: Floating Filter handling
     if (inFilter) {
-      if (k === "ESCAPE" || (ctrlDown && k === "Q")) {
-        e.preventDefault();
-        const filterEl = activeEl.closest('ui-filter');
-        if (filterEl && typeof filterEl.close === 'function') filterEl.close();
-        return;
-      }
+      if (k === 'ESCAPE' || (ctrlDown && k === 'Q')) { e.preventDefault(); activeEl.closest('ui-filter')?.close?.(); }
       return;
     }
 
-    // Context 3.5: Validation Pane handling (Escape closes at root or goes back in selection)
-    if (inValidationPane) {
-      if (k === "ESCAPE" && !isCellInput) {
-        e.preventDefault();
-        if (typeof validationPane.handleEscape === 'function') {
-          validationPane.handleEscape();
-        } else if (typeof validationPane.handleBack === 'function') {
-          validationPane.handleBack();
-        }
-        return;
-      }
-    }
-
-    // Context 4: Other form inputs (e.g. Validation pane, standalone inputs)
-    if (isOtherInput) {
+    if (inValidationPane && k === 'ESCAPE' && !isCellInput) {
+      e.preventDefault();
+      validationPane.handleBack?.();
       return;
     }
 
-    // Context 5: Active inline cell editing
+    if (isOtherInput) return;
+
     if (isCellInput) {
-      // Allow global shortcuts like Save, Open, or Filter to commit cell and execute
-      if (ctrlDown && (k === "S" || k === "O" || k === "Q")) {
+      if (ctrlDown && (k === 'S' || k === 'O' || k === 'Q')) {
         e.preventDefault();
-        if (k === "S") (shift ? cmd.saveAs.run() : cmd.save.run());
-        if (k === "O") cmd.open.run();
-        if (k === "Q") cmd.filter.run();
-        return;
+        if (k === 'S') (shift ? cmd.saveAs : cmd.save).run();
+        else if (k === 'O') cmd.open.run();
+        else if (k === 'Q') cmd.filter.run();
       }
-      // Native input cursor and text editing handled directly by inputField
       return;
     }
 
-    // =========================================================================
-    // Context 6: Normal Sheet Grid Mode
-    // =========================================================================
-    const isArrowKey = k === "ARROWUP" || k === "ARROWDOWN" || k === "ARROWLEFT" || k === "ARROWRIGHT";
-    const isBoundaryKey = isArrowKey || k === "HOME" || k === "END" || k === "PAGEUP" || k === "PAGEDOWN";
+    const isBoundaryKey = k === 'ARROWUP' || k === 'ARROWDOWN' || k === 'ARROWLEFT' || k === 'ARROWRIGHT' ||
+                          k === 'HOME' || k === 'END' || k === 'PAGEUP' || k === 'PAGEDOWN';
+    if (activeSheet) {
+      activeSheet.slctRange = shift && !alt && !e.metaKey && isBoundaryKey;
+    }
+
+    if ((alt && k === 'TAB') || (ctrlDown && (k === 'C' || k === 'V'))) return;
+    if (k === 'TAB') e.preventDefault();
+    if (e.code === 'Space') k = 'SPACE';
 
     if (activeSheet) {
-      // Range selection is ONLY active when Shift is held during navigation (Arrow, Home, End, PageUp, PageDown)
-      // Non-navigation keys and Ctrl+Shift shortcuts (e.g. Ctrl+Shift+D) must NOT enable range selection.
-      activeSheet.slctRange = shift && !alt && !meta && isBoundaryKey;
-    }
-
-    if (alt && k === "TAB") return;
-    if (ctrlDown && (k === "C" || k === "V")) return;
-    if (k === "TAB") e.preventDefault();
-    if (e.code === "Space") k = "SPACE";
-
-    // Paging navigation
-    if (k === "PAGEUP" && activeSheet) {
-      e.preventDefault();
       const pageSize = stg?.rows || 10;
-      activeSheet.y = Math.max(0, activeSheet.y - pageSize);
-      activeSheet.slctRefresh();
-      return;
-    }
-    if (k === "PAGEDOWN" && activeSheet) {
-      e.preventDefault();
-      const pageSize = stg?.rows || 10;
-      activeSheet.y = Math.min(activeSheet.rowCount - 1, activeSheet.y + pageSize);
-      activeSheet.slctRefresh();
-      return;
-    }
+      const maxX = Math.max(0, activeSheet.df.width - 1);
+      const maxY = Math.max(0, activeSheet.rowCount - 1);
 
-    // Home / End navigation
-    if (k === "HOME" && activeSheet) {
-      e.preventDefault();
+      if (k === 'PAGEUP') {
+        e.preventDefault();
+        activeSheet.y = Math.max(0, activeSheet.y - pageSize);
+        return activeSheet.slctRefresh();
+      }
+      if (k === 'PAGEDOWN') {
+        e.preventDefault();
+        activeSheet.y = Math.min(maxY, activeSheet.y + pageSize);
+        return activeSheet.slctRefresh();
+      }
+      if (k === 'HOME') {
+        e.preventDefault();
+        activeSheet.x = 0;
+        if (ctrlDown) activeSheet.y = 0;
+        return activeSheet.slctRefresh();
+      }
+      if (k === 'END' && ctrlDown) {
+        e.preventDefault();
+        activeSheet.x = maxX;
+        activeSheet.y = maxY;
+        return activeSheet.slctRefresh();
+      }
+      if (k === 'F2') {
+        e.preventDefault();
+        if (!activeSheet.df?.lock) activeSheet.input();
+        return;
+      }
       if (ctrlDown) {
-        activeSheet.x = 0;
-        activeSheet.y = 0;
-      } else {
-        activeSheet.x = 0;
-      }
-      activeSheet.slctRefresh();
-      return;
-    }
-    if (k === "END" && ctrlDown && activeSheet) {
-      e.preventDefault();
-      const maxX = Math.max(0, activeSheet.df.width - 1);
-      const maxY = Math.max(0, activeSheet.rowCount - 1);
-      activeSheet.x = maxX;
-      activeSheet.y = maxY;
-      activeSheet.slctRefresh();
-      return;
-    }
-
-    // F2: Enter cell editing mode
-    if (k === "F2" && activeSheet) {
-      e.preventDefault();
-      if (activeSheet.df?.lock) return;
-      activeSheet.input();
-      return;
-    }
-
-    // Ctrl + Arrow navigation (jump to grid boundaries, with or without range selection)
-    if (ctrlDown && activeSheet) {
-      const maxX = Math.max(0, activeSheet.df.width - 1);
-      const maxY = Math.max(0, activeSheet.rowCount - 1);
-      switch (k) {
-        case "ARROWUP": e.preventDefault(); activeSheet.y = 0; activeSheet.slctRefresh(); return;
-        case "ARROWRIGHT": e.preventDefault(); activeSheet.x = maxX; activeSheet.slctRefresh(); return;
-        case "ARROWDOWN": e.preventDefault(); activeSheet.y = maxY; activeSheet.slctRefresh(); return;
-        case "ARROWLEFT": e.preventDefault(); activeSheet.x = 0; activeSheet.slctRefresh(); return;
+        if (k === 'ARROWUP') { e.preventDefault(); activeSheet.y = 0; return activeSheet.slctRefresh(); }
+        if (k === 'ARROWRIGHT') { e.preventDefault(); activeSheet.x = maxX; return activeSheet.slctRefresh(); }
+        if (k === 'ARROWDOWN') { e.preventDefault(); activeSheet.y = maxY; return activeSheet.slctRefresh(); }
+        if (k === 'ARROWLEFT') { e.preventDefault(); activeSheet.x = 0; return activeSheet.slctRefresh(); }
       }
     }
 
-    // Command registry execution via O(1) shortcut map
     const map = getShortcutMap();
     const matchedCmd = map.get(getShortcutKey(k, ctrlDown, shift, alt)) ||
                        map.get(getShortcutKey(e.key, ctrlDown, shift, alt));
@@ -272,111 +186,88 @@ export function buildKeys() {
       return e.preventDefault();
     }
 
-    // Printable single character typed on grid -> enters edit mode
     if (e.key.length === 1 && !ctrlDown && !e.metaKey && !alt && activeSheet) {
       if (activeSheet.df?.lock) return;
       e.preventDefault();
       return activeSheet.input(e.key);
     }
 
-    // Grid arrow and cell navigation
     if (activeSheet) {
       switch (k) {
-        case "ARROWUP": e.preventDefault(); activeSheet.y--; activeSheet.slctRefresh(); return;
-        case "ARROWDOWN": e.preventDefault(); activeSheet.y++; activeSheet.slctRefresh(); return;
-        case "ARROWLEFT": e.preventDefault(); activeSheet.x--; activeSheet.slctRefresh(); return;
-        case "ARROWRIGHT": e.preventDefault(); activeSheet.x++; activeSheet.slctRefresh(); return;
-        case "TAB":
+        case 'ARROWUP': e.preventDefault(); activeSheet.y--; activeSheet.slctRefresh(); return;
+        case 'ARROWDOWN': e.preventDefault(); activeSheet.y++; activeSheet.slctRefresh(); return;
+        case 'ARROWLEFT': e.preventDefault(); activeSheet.x--; activeSheet.slctRefresh(); return;
+        case 'ARROWRIGHT': e.preventDefault(); activeSheet.x++; activeSheet.slctRefresh(); return;
+        case 'TAB':
           e.preventDefault();
           activeSheet.slctRange = false;
           activeSheet.rangeEnd = undefined;
-          if (shift) activeSheet.x--;
-          else activeSheet.x++;
+          activeSheet.x += shift ? -1 : 1;
           activeSheet.slctRefresh();
           return;
-        case "ENTER":
+        case 'ENTER':
           e.preventDefault();
-          if (activeSheet.df?.lock) return;
-          activeSheet.input();
+          if (!activeSheet.df?.lock) activeSheet.input();
           return;
-        case "BACKSPACE":
-        case "DELETE":
+        case 'BACKSPACE':
+        case 'DELETE':
           e.preventDefault();
-          if (activeSheet.df?.lock) return;
-          activeSheet.rangeEdit('');
-          activeSheet.refresh();
+          if (!activeSheet.df?.lock) {
+            activeSheet.rangeEdit('');
+            activeSheet.refresh();
+          }
           return;
       }
     }
   };
 
-  const onKeyUp = function (e) {
+  activeKeyUpHandler = (e) => {
     const k = e.key.toUpperCase();
     const activeSheet = getSheet();
-    if (!activeSheet) return;
-    switch (k) {
-      case "CONTROL":
-      case "SHIFT":
-        if (!e.shiftKey) {
-          activeSheet.slctRange = false;
-        }
-        return;
+    if (activeSheet && (k === 'CONTROL' || k === 'SHIFT') && !e.shiftKey) {
+      activeSheet.slctRange = false;
     }
   };
 
-  activeKeyDownHandler = onKeyDown;
-  activeKeyUpHandler = onKeyUp;
-
-  document.addEventListener('keydown', onKeyDown);
-  document.addEventListener('keyup', onKeyUp);
-
-  activeCopyHandler = function (e) {
-    const activeEl = document.activeElement;
-    const inputting = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.isContentEditable);
-    if (inputting) return;
-    const activeSheet = getSheet();
-    if (!activeSheet) return;
-    e.preventDefault();
-    const serializer = new CsvSerializer({ delimiter: '\t' });
-    const clip = serializer.serialize(activeSheet.rangeArray());
-    e.clipboardData?.setData('text/plain', clip);
+  const getClipboardSheet = (requireUnlocked = false) => {
+    if (isInputElement(document.activeElement)) return null;
+    const s = getSheet();
+    return (!s || (requireUnlocked && s.df?.lock)) ? null : s;
   };
 
-  activeCutHandler = function (e) {
-    const activeEl = document.activeElement;
-    const inputting = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.isContentEditable);
-    if (inputting) return;
-    const activeSheet = getSheet();
-    if (!activeSheet || activeSheet.df?.lock) return;
+  activeCopyHandler = (e) => {
+    const s = getClipboardSheet(false);
+    if (!s) return;
     e.preventDefault();
-    const serializer = new CsvSerializer({ delimiter: '\t' });
-    const clip = serializer.serialize(activeSheet.rangeArray());
-    e.clipboardData?.setData('text/plain', clip);
-    activeSheet.rangeEdit('');
-    activeSheet.refresh();
+    e.clipboardData?.setData('text/plain', new CsvSerializer({ delimiter: '\t' }).serialize(s.rangeArray()));
   };
 
-  activePasteHandler = function (e) {
-    const activeEl = document.activeElement;
-    const inputting = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.isContentEditable);
-    if (inputting) return;
-    const activeSheet = getSheet();
-    if (!activeSheet || activeSheet.df?.lock) return;
+  activeCutHandler = (e) => {
+    const s = getClipboardSheet(true);
+    if (!s) return;
+    e.preventDefault();
+    e.clipboardData?.setData('text/plain', new CsvSerializer({ delimiter: '\t' }).serialize(s.rangeArray()));
+    s.rangeEdit('');
+    s.refresh();
+  };
+
+  activePasteHandler = (e) => {
+    const s = getClipboardSheet(true);
+    if (!s) return;
     e.preventDefault();
     const rawText = e.clipboardData?.getData('text');
     if (!rawText) return;
-
     const delimiter = rawText.includes('\t') ? '\t' : SeparatorDetector.detect(rawText);
-    const trimUnquotedWhitespace = Boolean(stg?.trim_unquoted);
-    const parser = new CsvParser({ delimiter, trimUnquotedWhitespace });
-    const matrix = parser.parse(rawText);
-    if (matrix && matrix.length > 0) {
-      activeSheet.paste(matrix);
-      activeSheet.refresh();
+    const matrix = new CsvParser({ delimiter, trimUnquotedWhitespace: Boolean(stg?.trim_unquoted) }).parse(rawText);
+    if (matrix?.length > 0) {
+      s.paste(matrix);
+      s.refresh();
     }
   };
 
+  document.addEventListener('keydown', activeKeyDownHandler);
+  document.addEventListener('keyup', activeKeyUpHandler);
   document.addEventListener('copy', activeCopyHandler);
   document.addEventListener('cut', activeCutHandler);
   document.addEventListener('paste', activePasteHandler);
-};
+}

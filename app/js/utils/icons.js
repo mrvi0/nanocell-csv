@@ -1,9 +1,10 @@
-// Vite auto-inlines or bundles all SVGs in app/icons/
-// Files smaller than 4KB are automatically converted into data:image/svg+xml;base64,...
-const iconModules = import.meta.glob('../../icons/*.svg', {
-  eager: true,
-  import: 'default'
-});
+let iconModules = {};
+try {
+  iconModules = import.meta.glob('../../icons/*.svg', {
+    eager: true,
+    import: 'default'
+  });
+} catch {}
 
 const iconMap = new Map();
 

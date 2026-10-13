@@ -1,9 +1,8 @@
-import { getSheet, setCsvHandle, getCsvHandle } from './appContext.js';
+import { getSheet, setCsvHandle } from './appContext.js';
 import './ui/ContextMenu.js';
-import { buildMenu } from './ui/MenuBar.js';
 import { CsvHandle } from './io/CsvHandle.js';
 import { Dataframe } from '../../core/model/Dataframe.js';
-import { AppLayout } from './ui/AppLayout.js';
+import { AppLayout, buildMenu } from './ui/AppLayout.js';
 import { buildKeys } from './interaction/KeyboardRouter.js';
 import { Setting } from './ui/settings/Setting.js';
 import { Sheet } from './sheet/Sheet.js';
@@ -12,17 +11,13 @@ import './ui/ValidationPane.js';
 import './ui/AboutDialog.js';
 import './ui/FinderDialog.js';
 import { Notification, showBrowserCompatibilityNotice } from './ui/Notification.js';
-import './interaction/MouseRouter.js';
 import { registerSW } from 'virtual:pwa-register';
 import { env } from './utils/misc.js';
 
-
-//on window/tab close, prompts the user for confirmation if currentSheet is not saved
-window.addEventListener('beforeunload', function (e) {
+window.addEventListener('beforeunload', (e) => {
   const currentSheet = getSheet();
   if (currentSheet?.df && !currentSheet.df.isSaved) e.preventDefault();
 });
-
 
 export function nanocell_cleanStart() {
   const csvHandle = new CsvHandle();
@@ -32,7 +27,7 @@ export function nanocell_cleanStart() {
   Setting.runAll();
   buildMenu();
   buildKeys();
-  new Sheet(new Dataframe([["Hello World"]]));
+  new Sheet(new Dataframe([['Hello World']]));
   csvHandle.initListeners();
   if (!env.supportsFileSystemAccess) {
     showBrowserCompatibilityNotice();
@@ -46,12 +41,13 @@ if (typeof document !== 'undefined') {
     nanocell_cleanStart();
   }
 }
+
 export function handleSWUpdatePrompt(updateSWFn = updateSW) {
   const currentSheet = getSheet();
   const hasUnsaved = currentSheet?.df && !currentSheet.df.isSaved;
   const message = hasUnsaved
-    ? "A new update is available. You have unsaved changes. Please save your file before updating."
-    : "A new update is available. Reload to update?";
+    ? 'A new update is available. You have unsaved changes. Please save your file before updating.'
+    : 'A new update is available. Reload to update?';
 
   return new Notification(message, {
     id: 3,
@@ -63,12 +59,10 @@ export function handleSWUpdatePrompt(updateSWFn = updateSW) {
     cbt: () => {
       const sheetNow = getSheet();
       if (sheetNow?.df && !sheetNow.df.isSaved) {
-        Notification.warning("Please save your changes before reloading.", "Unsaved Changes");
+        Notification.warning('Please save your changes before reloading.', 'Unsaved Changes');
         return;
       }
-      if (typeof updateSWFn === 'function') {
-        updateSWFn(true);
-      }
+      if (typeof updateSWFn === 'function') updateSWFn(true);
     }
   }).show();
 }

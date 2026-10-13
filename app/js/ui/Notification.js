@@ -1,5 +1,6 @@
 import { setIcon } from '../utils/icons.js';
 import { pwa } from '../utils/misc.js';
+import { DialogManager } from './DialogManager.js';
 
 function sanitizeHtml(html) {
   if (typeof html !== 'string') return '';
@@ -14,119 +15,57 @@ function sanitizeHtml(html) {
 const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
 class Notification extends BaseElement {
-  constructor(txt = "Empty message", opt = {}) {
+  constructor(txt = 'Empty message', opt = {}) {
     super();
     this.txt = txt;
     this.opt = typeof opt === 'number' ? { t: opt } : (opt || {});
     if (typeof document === 'undefined') return;
 
-    this.content = document.createElement("div");
-    this.content.className = "ui-msg-text";
+    this.content = document.createElement('div');
+    this.content.className = 'ui-msg-text';
     if (typeof txt === 'string' && !txt.includes('<') && !txt.includes('&')) {
       this.content.textContent = txt;
     } else {
       this.content.innerHTML = sanitizeHtml(txt);
     }
 
-    this.ok = document.createElement("button");
-    this.ok.className = "icon ui-msg-btn ui-msg-ok";
-    this.ok.type = "button";
-    this.ok.setAttribute("title", this.opt.okText || "OK");
-    this.ok.setAttribute("aria-label", this.opt.okText || "OK");
-    setIcon(this.ok, 'on');
+    const makeBtn = (cls, label, icon, onClick) => {
+      const btn = document.createElement('button');
+      btn.className = `icon ${cls}`;
+      btn.type = 'button';
+      btn.setAttribute('title', label);
+      btn.setAttribute('aria-label', label);
+      setIcon(btn, icon);
+      btn.onclick = onClick;
+      return btn;
+    };
 
-    this.cancel = document.createElement("button");
-    this.cancel.className = "icon ui-msg-btn ui-msg-cancel";
-    this.cancel.type = "button";
-    this.cancel.setAttribute("title", this.opt.cancelText || "Cancel");
-    this.cancel.setAttribute("aria-label", this.opt.cancelText || "Cancel");
-    setIcon(this.cancel, 'off');
-
-    this.closeBtn = document.createElement('button');
-    this.closeBtn.className = 'icon ui-toast-close-btn';
-    this.closeBtn.type = 'button';
-    this.closeBtn.setAttribute('title', 'Close notification');
-    this.closeBtn.setAttribute('aria-label', 'Close notification');
-    setIcon(this.closeBtn, 'off');
-
-    this.ok.onclick = () => {
-      if (this.opt.cbt) this.opt.cbt();
+    this.ok = makeBtn('ui-msg-btn ui-msg-ok', this.opt.okText || 'OK', 'on', () => {
+      this.opt.cbt?.();
       this.dismiss();
-    };
-
-    this.cancel.onclick = () => {
-      if (this.opt.cbf) this.opt.cbf();
+    });
+    this.cancel = makeBtn('ui-msg-btn ui-msg-cancel', this.opt.cancelText || 'Cancel', 'off', () => {
+      this.opt.cbf?.();
       this.dismiss();
-    };
-
-    this.closeBtn.onclick = () => {
-      if (this.opt.cbf) this.opt.cbf();
+    });
+    this.closeBtn = makeBtn('ui-toast-close-btn', 'Close notification', 'off', () => {
+      this.opt.cbf?.();
       this.dismiss();
-    };
-
-    const getFocusableButtons = () => {
-      const btns = [];
-      if (this.cancel && this.cancel.parentNode) btns.push(this.cancel);
-      if (this.ok && this.ok.parentNode) btns.push(this.ok);
-      if (this.closeBtn && this.closeBtn.parentNode) btns.push(this.closeBtn);
-      return btns;
-    };
-
-    const cycleFocus = (e, currentBtn) => {
-      const focusable = getFocusableButtons();
-      if (focusable.length <= 1) return;
-      e.preventDefault();
-      const idx = focusable.indexOf(currentBtn);
-      let nextIdx;
-      if (e.shiftKey) {
-        nextIdx = (idx <= 0) ? focusable.length - 1 : idx - 1;
-      } else {
-        nextIdx = (idx === -1 || idx >= focusable.length - 1) ? 0 : idx + 1;
-      }
-      focusable[nextIdx].focus();
-    };
-
-    this.ok.addEventListener('keydown', (e) => {
-      const k = e.key.toUpperCase();
-      if (k === "TAB") {
-        cycleFocus(e, this.ok);
-      } else if (k === "ARROWLEFT" || k === "ARROWRIGHT") {
-        if (this.opt.id === 3 && this.cancel.parentNode) {
-          e.preventDefault();
-          this.cancel.focus();
-        }
-      } else if (k === "ESCAPE") {
-        e.preventDefault();
-        if (this.cancel.parentNode) {
-          this.cancel.click();
-        } else {
-          this.dismiss();
-        }
-      }
     });
 
-    this.cancel.addEventListener('keydown', (e) => {
+    this.addEventListener('keydown', (e) => {
       const k = e.key.toUpperCase();
-      if (k === "TAB") {
-        cycleFocus(e, this.cancel);
-      } else if (k === "ARROWLEFT" || k === "ARROWRIGHT") {
-        if (this.ok.parentNode) {
-          e.preventDefault();
-          this.ok.focus();
-        }
-      } else if (k === "ESCAPE") {
+      const focusable = [this.cancel, this.ok, this.closeBtn].filter(b => b?.parentNode);
+      if (k === 'TAB') {
+        if (focusable.length > 1) DialogManager.cycleFocus(e, focusable);
+      } else if ((k === 'ARROWLEFT' || k === 'ARROWRIGHT') && this.cancel.parentNode && this.ok.parentNode) {
         e.preventDefault();
-        this.cancel.click();
-      }
-    });
-
-    this.closeBtn.addEventListener('keydown', (e) => {
-      const k = e.key.toUpperCase();
-      if (k === "TAB") {
-        cycleFocus(e, this.closeBtn);
-      } else if (k === "ESCAPE") {
+        (document.activeElement === this.ok ? this.cancel : this.ok).focus();
+      } else if (k === 'ESCAPE') {
         e.preventDefault();
-        this.closeBtn.click();
+        if (this.cancel.parentNode) this.cancel.click();
+        else if (this.closeBtn.parentNode) this.closeBtn.click();
+        else this.dismiss();
       }
     });
   }
@@ -134,7 +73,6 @@ class Notification extends BaseElement {
   connectedCallback() {
     if (this._initialized) return;
     this._initialized = true;
-
     this.renderToast();
   }
 
@@ -147,20 +85,14 @@ class Notification extends BaseElement {
       container.className = 'ui-toast-container';
       document.body.appendChild(container);
     }
-    if (container && !container.contains(this)) {
-      container.appendChild(this);
-    }
-
-    if (!this._initialized) {
-      this.connectedCallback();
-    }
+    if (!container.contains(this)) container.appendChild(this);
+    if (!this._initialized) this.connectedCallback();
     return this;
   }
 
   renderToast() {
-    this.className = "ui-toast-card";
-    const type = this.opt.type || (this.opt.id === 3 ? 'warning' : (this.opt.id === 2 ? 'info' : 'info'));
-    this.classList.add(`ui-toast-${type}`);
+    const type = this.opt.type || (this.opt.id === 3 ? 'warning' : 'info');
+    this.className = `ui-toast-card ui-toast-${type}`;
 
     const bodyDiv = document.createElement('div');
     bodyDiv.className = 'ui-toast-body';
@@ -176,9 +108,7 @@ class Notification extends BaseElement {
     if (hasButtons) {
       const actionsDiv = document.createElement('div');
       actionsDiv.className = 'ui-toast-actions';
-      if (this.opt.id === 3) {
-        actionsDiv.appendChild(this.cancel);
-      }
+      if (this.opt.id === 3) actionsDiv.appendChild(this.cancel);
       actionsDiv.appendChild(this.ok);
       bodyDiv.appendChild(actionsDiv);
     }
@@ -193,19 +123,12 @@ class Notification extends BaseElement {
       progress.style.setProperty('--toast-duration', `${timeout}ms`);
       progress.style.animationDuration = `${timeout}ms`;
       this.appendChild(progress);
-
-      this.timer = setTimeout(() => {
-        this.dismiss();
-      }, timeout);
+      this.timer = setTimeout(() => this.dismiss(), timeout);
     }
 
     if (hasButtons) {
       setTimeout(() => {
-        if (this.opt.id === 3 && this.opt.defaultFocus === 'cancel') {
-          this.cancel.focus();
-        } else {
-          this.ok.focus();
-        }
+        (this.opt.id === 3 && this.opt.defaultFocus === 'cancel' ? this.cancel : this.ok).focus();
       }, 10);
     }
   }
@@ -213,22 +136,17 @@ class Notification extends BaseElement {
   dismiss() {
     if (this.timer) clearTimeout(this.timer);
     this.classList?.add('ui-msg-closing');
-    setTimeout(() => {
-      if (this.parentNode) {
-        this.remove();
-      }
-    }, 150);
+    setTimeout(() => this.remove?.(), 150);
   }
 
-  static quick(txt) { const m = new Notification(txt, { id: 0, t: 1500, type: 'info' }); return m.show(); }
-  static long(txt) { const m = new Notification(txt, { id: 1, t: 3500, type: 'info' }); return m.show(); }
-  static confirm(txt, cb) { const m = new Notification(txt, { id: 2, cbt: cb, type: 'info' }); return m.show(); }
-  static choice(txt, cbTrue, cbFalse) { const m = new Notification(txt, { id: 3, cbt: cbTrue, cbf: cbFalse, type: 'warning' }); return m.show(); }
-
-  static info(txt, title = 'Information') { const m = new Notification(txt, { t: 3000, type: 'info', title }); return m.show(); }
-  static success(txt, title = 'Success') { const m = new Notification(txt, { t: 3000, type: 'success', title }); return m.show(); }
-  static warning(txt, title = 'Warning') { const m = new Notification(txt, { t: 4000, type: 'warning', title }); return m.show(); }
-  static error(txt, title = 'Error') { const m = new Notification(txt, { id: 2, type: 'error', title }); return m.show(); }
+  static quick(txt) { return new Notification(txt, { id: 0, t: 1500, type: 'info' }).show(); }
+  static long(txt) { return new Notification(txt, { id: 1, t: 3500, type: 'info' }).show(); }
+  static confirm(txt, cb) { return new Notification(txt, { id: 2, cbt: cb, type: 'info' }).show(); }
+  static choice(txt, cbTrue, cbFalse) { return new Notification(txt, { id: 3, cbt: cbTrue, cbf: cbFalse, type: 'warning' }).show(); }
+  static info(txt, title = 'Information') { return new Notification(txt, { t: 3000, type: 'info', title }).show(); }
+  static success(txt, title = 'Success') { return new Notification(txt, { t: 3000, type: 'success', title }).show(); }
+  static warning(txt, title = 'Warning') { return new Notification(txt, { t: 4000, type: 'warning', title }).show(); }
+  static error(txt, title = 'Error') { return new Notification(txt, { id: 2, type: 'error', title }).show(); }
 }
 
 if (typeof customElements !== 'undefined' && !customElements.get('ui-msg')) {
@@ -237,13 +155,8 @@ if (typeof customElements !== 'undefined' && !customElements.get('ui-msg')) {
 
 let activeCompatToast = null;
 
-/**
- * Displays a persistent notification explaining File System Access API compatibility mode.
- */
 export function showBrowserCompatibilityNotice() {
-  if (typeof document === 'undefined') return;
-  if (activeCompatToast && activeCompatToast.parentNode) return;
-
+  if (typeof document === 'undefined' || activeCompatToast?.parentNode) return;
   const messageHtml = `
     <div>
       Direct in-place file saving requires the modern <strong>File System Access API</strong>, which is not supported in this browser.
@@ -257,34 +170,27 @@ export function showBrowserCompatibilityNotice() {
       </div>
     </div>
   `;
-
   activeCompatToast = new Notification(messageHtml, {
     id: 2,
     type: 'info',
     title: 'Browser Compatibility Notice'
-  });
-  activeCompatToast.show();
+  }).show();
 }
 
-/**
- * Triggers the PWA install flow from inside the app and displays contextual toast feedback.
- */
 export async function triggerAppInstall() {
   const outcome = await pwa.promptInstall();
   if (outcome === 'already-installed') {
-    Notification.quick("NanoCell is already installed.");
+    Notification.quick('NanoCell is already installed.');
   } else if (outcome === 'manual') {
-    Notification.confirm("To install NanoCell, click the install icon in your browser address bar or browser menu.");
+    Notification.confirm('To install NanoCell, click the install icon in your browser address bar or browser menu.');
   } else if (outcome === 'unsupported') {
-    Notification.confirm("Desktop installation is available on Chrome, Edge, Brave, and Chromium browsers.");
+    Notification.confirm('Desktop installation is available on Chrome, Edge, Brave, and Chromium browsers.');
   }
   return outcome;
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('appinstalled', () => {
-    Notification.quick("NanoCell installed successfully!");
-  });
+  window.addEventListener('appinstalled', () => Notification.quick('NanoCell installed successfully!'));
 }
 
 export { Notification };

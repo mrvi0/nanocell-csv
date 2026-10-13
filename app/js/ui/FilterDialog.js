@@ -1,14 +1,8 @@
-/**
- * Floating Filter Dialog component (<ui-filter>).
- * Allows filtering rows by column value with match-case option and lock enforcement.
- * Styled in alignment with FinderDialog floating panel.
- * @module FilterDialog
- */
 import { DialogManager } from './DialogManager.js';
 import { getSheet, getCsvHandle } from '../appContext.js';
 import { setIcon } from '../utils/icons.js';
 import { Notification } from './Notification.js';
-import { NumInput } from './controls/NumInput.js';
+import { NumInput } from './settings/Setting.js';
 
 const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
@@ -17,22 +11,8 @@ class FilterDialog extends BaseElement {
     super();
     this.sheet = sheet;
     this._previousLock = null;
+    this.matchCase = false;
 
-    const self = this;
-    this._caseSensitiveVal = false;
-    this.caseSensitive = {
-      get value() { return self._caseSensitiveVal; },
-      set value(v) {
-        const bool = Boolean(v);
-        self._caseSensitiveVal = bool;
-        if (self.caseBtn) {
-          self.caseBtn.setAttribute('aria-pressed', bool ? 'true' : 'false');
-          self.caseBtn.classList.toggle('active', bool);
-        }
-      }
-    };
-
-    // Construct Widget UI DOM (Row 1: 2 inputs; Row 2: title on left, buttons on right)
     this.widget = document.createElement('div');
     this.widget.className = 'finder-widget filter-widget floating-panel';
     this.widget.innerHTML = `
@@ -43,7 +23,6 @@ class FilterDialog extends BaseElement {
           <span class="finder-count-badge"></span>
         </div>
       </div>
-
       <div class="finder-row filter-row filter-bottom-row">
         <span class="filter-col-title" title="Selected column header"></span>
         <div class="finder-btn-group">
@@ -54,16 +33,12 @@ class FilterDialog extends BaseElement {
       </div>
     `;
 
-    // Initialize NumInput for column selection
     this.colInput = new NumInput(1, 1, 999, 'linear');
     this.colInput.setAttribute('aria-label', 'Column number');
     this.colInput.setAttribute('title', 'Column number');
-    if (typeof this.colInput.connectedCallback === 'function' && !this.colInput._initialized) {
-      this.colInput.connectedCallback();
-    }
+    if (!this.colInput._initialized) this.colInput.connectedCallback?.();
     this.widget.querySelector('.filter-col-container').appendChild(this.colInput);
 
-    // References
     this.colTitle = this.widget.querySelector('.filter-col-title');
     this.filterInput = this.widget.querySelector('.filter-input');
     this.countBadge = this.widget.querySelector('.finder-count-badge');
@@ -71,54 +46,38 @@ class FilterDialog extends BaseElement {
     this.applyBtn = this.widget.querySelector('.apply-btn');
     this.closeBtn = this.widget.querySelector('.close-btn');
 
-    // Icons
     setIcon(this.caseBtn, 'match_case');
     setIcon(this.applyBtn, 'on');
     setIcon(this.closeBtn, 'off');
-
     this.appendChild(this.widget);
 
-    // Bind event listeners
-    this.applyBtn.addEventListener('click', () => { this.applyFilter(); });
-    this.closeBtn.addEventListener('click', () => { this.close(); });
+    this.applyBtn.addEventListener('click', () => this.applyFilter());
+    this.closeBtn.addEventListener('click', () => this.close());
     this.caseBtn.addEventListener('click', () => {
-      this.caseSensitive.value = !this.caseSensitive.value;
-      if (this.filterInput.value.length > 0) {
-        this.applyFilter();
-      }
+      this.matchCase = !this.matchCase;
+      this.caseBtn.setAttribute('aria-pressed', this.matchCase ? 'true' : 'false');
+      this.caseBtn.classList.toggle('active', this.matchCase);
+      if (this.filterInput.value) this.applyFilter();
     });
 
     const handleKeydown = (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        this.close();
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        e.stopPropagation();
-        this.applyFilter();
-      }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.close(); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); this.applyFilter(); }
     };
 
     this.filterInput.addEventListener('keydown', handleKeydown);
     this.filterInput.addEventListener('input', () => {
-      if (this.filterInput.value.length === 0) {
-        if (this.activeSheet && this.activeSheet.filterRows !== null) {
-          this.applyFilter();
-        } else {
-          this.countBadge.textContent = '';
-        }
+      if (!this.filterInput.value) {
+        if (this.activeSheet?.filterRows !== null) this.applyFilter();
+        else this.countBadge.textContent = '';
       }
     });
     this.colInput.addEventListener('keydown', handleKeydown);
     this.colInput.addEventListener('change', () => {
       this.updateColTitle();
-      if (this.filterInput.value.length > 0) {
-        this.applyFilter();
-      }
+      if (this.filterInput.value) this.applyFilter();
     });
 
-    // Tab trap
     this.widget.addEventListener('keydown', (e) => {
       if (e.key === 'Tab') {
         e.stopPropagation();
@@ -128,34 +87,28 @@ class FilterDialog extends BaseElement {
   }
 
   getFocusableElements() {
-    const list = [
-      this.colInput,
-      this.filterInput,
-      this.caseBtn,
-      this.applyBtn,
-      this.closeBtn
-    ];
-    return list.filter(el => el && !el.disabled && !el.hidden && el.style.display !== 'none');
+    return [this.colInput, this.filterInput, this.caseBtn, this.applyBtn, this.closeBtn]
+      .filter(el => el && !el.disabled && !el.hidden && el.style.display !== 'none');
   }
 
-  get activeSheet() {
-    return this.sheet || getSheet();
-  }
+  get activeSheet() { return this.sheet || getSheet(); }
+  get isOpen() { return this.classList.contains('open') || this.hasAttribute('open'); }
 
-  get isOpen() {
-    return this.classList.contains('open') || this.hasAttribute('open');
+  getColIndex() {
+    const df = this.activeSheet?.df;
+    const colVal = Number(this.colInput.value);
+    return Math.max(0, Math.min((isNaN(colVal) ? 1 : colVal) - 1, (df?.width || 1) - 1));
   }
 
   updateColTitle() {
-    const activeSheet = this.activeSheet;
-    if (!activeSheet || !activeSheet.df) {
+    const df = this.activeSheet?.df;
+    if (!df) {
       if (this.colTitle) this.colTitle.textContent = '';
       return;
     }
-    const colVal = Number(this.colInput.value);
-    const colIndex = Math.max(0, Math.min((isNaN(colVal) ? 1 : colVal) - 1, activeSheet.df.width - 1));
-    const headerVal = activeSheet.df.get(colIndex, 0);
-    const title = (headerVal && headerVal.trim().length > 0) ? headerVal.trim() : `Column ${colIndex + 1}`;
+    const colIndex = this.getColIndex();
+    const headerVal = df.get(colIndex, 0)?.trim();
+    const title = headerVal || `Column ${colIndex + 1}`;
     if (this.colTitle) {
       this.colTitle.textContent = title;
       this.colTitle.setAttribute('title', `Column ${colIndex + 1}: ${title}`);
@@ -163,50 +116,34 @@ class FilterDialog extends BaseElement {
   }
 
   open(colIndex) {
-    const csv = getCsvHandle();
-    if (csv && csv.viewOnly) {
-      Notification.warning("Filter is not available in Fast Preview mode.", "Filter");
+    if (getCsvHandle()?.viewOnly) {
+      Notification.warning('Filter is not available in Fast Preview mode.', 'Filter');
       return;
     }
-
     const activeSheet = this.activeSheet;
-    if (!activeSheet || !activeSheet.df) return;
+    if (!activeSheet?.df) return;
 
-    // Immediately lock sheet edits
     if (this._previousLock === null || this._previousLock === undefined) {
       this._previousLock = Boolean(activeSheet.df.lock);
     }
     activeSheet.df.lock = true;
-    if (activeSheet.inputing && activeSheet.controller) {
-      activeSheet.controller.inputBlur();
-    }
-    if (activeSheet.view) {
-      activeSheet.view.footerUpdate();
-    }
+    if (activeSheet.inputing) activeSheet.inputBlur?.();
+    activeSheet.view?.footerUpdate();
 
-    // Set default column index (1-based for user display)
     const maxCols = Math.max(1, activeSheet.df.width);
     this.colInput.min = 1;
     this.colInput.max = maxCols;
-    const targetCol = (colIndex !== undefined && colIndex !== null && colIndex >= 0)
-      ? (colIndex + 1)
-      : (activeSheet.x + 1);
+    const targetCol = (colIndex !== undefined && colIndex !== null && colIndex >= 0) ? colIndex + 1 : activeSheet.x + 1;
     this.colInput.value = Math.max(1, Math.min(targetCol, maxCols));
     this.updateColTitle();
 
-    if (!this.parentNode) {
-      document.body.appendChild(this);
-    }
-
+    if (!this.parentNode) document.body.appendChild(this);
     this.classList.add('visible', 'open');
     this.setAttribute('open', '');
     this.removeAttribute('hidden');
     this.style.display = 'block';
 
-    if (!activeSheet || activeSheet.filterRows === null) {
-      this.countBadge.textContent = '';
-    }
-
+    if (activeSheet.filterRows === null) this.countBadge.textContent = '';
     this.filterInput.focus();
     this.filterInput.select();
   }
@@ -220,33 +157,21 @@ class FilterDialog extends BaseElement {
     const activeSheet = this.activeSheet;
     if (activeSheet) {
       activeSheet.clearFilter();
-      if (activeSheet.df) {
-        activeSheet.df.lock = this._previousLock ?? false;
-      }
+      if (activeSheet.df) activeSheet.df.lock = this._previousLock ?? false;
       this._previousLock = null;
-      if (activeSheet.view) {
-        activeSheet.view.footerUpdate();
-        activeSheet.view.refresh();
-      }
-      if (typeof activeSheet.slctRefresh === 'function') {
-        activeSheet.slctRefresh(true);
-      }
+      activeSheet.view?.footerUpdate();
+      activeSheet.view?.refresh();
+      activeSheet.slctRefresh?.(true);
     }
-
     this.countBadge.textContent = '';
   }
 
   applyFilter() {
     const activeSheet = this.activeSheet;
-    if (!activeSheet || !activeSheet.df) return;
+    if (!activeSheet?.df) return;
 
     this.updateColTitle();
-    const colVal = Number(this.colInput.value);
-    const colIndex = Math.max(0, Math.min((isNaN(colVal) ? 1 : colVal) - 1, activeSheet.df.width - 1));
-    const query = this.filterInput.value;
-    const matchCase = Boolean(this.caseSensitive.value);
-
-    activeSheet.setFilter(colIndex, query, matchCase);
+    activeSheet.setFilter(this.getColIndex(), this.filterInput.value, this.matchCase);
 
     if (activeSheet.filterRows === null) {
       this.countBadge.textContent = '';

@@ -1,45 +1,58 @@
 /**
  * @file core/validation/DataValidator.ts
- * Tabular data validator: whitespace trimming, decimal coercion, character normalization.
+ * Unified tabular data, header, and date validator with declarative cell transforms.
  * ZERO browser/DOM imports.
  */
 
 import { Dataframe } from '../model/Dataframe.js';
-import { ValidationProposal } from './ValidationRule.js';
+import { parseDateCandidate, parseYearFirstDate } from '../utils/date.js';
 
-export interface DataValidatorOptions {
-  trimWhitespace?: boolean;
-  coerceCommaDecimals?: boolean;
-  replaceCommaWithHyphen?: boolean;
-  replaceNewlineWithPipe?: boolean;
-  replaceDoubleQuotes?: boolean;
-  toLowerCase?: boolean;
+export interface ValidationProposal {
+  readonly x: number;
+  readonly y: number;
+  readonly oldValue: string;
+  readonly newValue: string;
+  status?: 'pending' | 'accepted' | 'rejected';
 }
 
+export interface ValidationRunResult {
+  readonly proposals: ValidationProposal[];
+  readonly reason?: 'coexistence' | 'ambiguous' | 'no_dates';
+}
+
+const isNum = (s: string) => Number.isFinite(Number(s));
+
+const CELL_TRANSFORMS: Record<string, (val: string) => string> = {
+  trim_whitespace: val => val.trim(),
+  comma_decimals: val => {
+    if (val.includes(',') && !isNum(val)) {
+      const candidate = val.replace(',', '.');
+      if (isNum(candidate)) return candidate;
+    }
+    return val;
+  },
+  line_returns: val => (!isNum(val) && val.includes('\n')) ? val.replaceAll('\n', '|') : val,
+  double_quotes: val => (!isNum(val) && val.includes('"')) ? val.replaceAll('"', "'") : val,
+  text_commas: val => (!isNum(val) && val.includes(',')) ? val.replaceAll(',', '-') : val,
+  lowercase: val => !isNum(val) ? val.toLowerCase() : val
+};
+
+const fmtIsoDate = (y: number, m: number, d: number) =>
+  `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
 export class DataValidator {
-  static validate(dataframe: Dataframe, options: DataValidatorOptions = {}): ValidationProposal[] {
-    const isExplicit = Object.keys(options).length > 0;
-    const opts = {
-      trimWhitespace: options.trimWhitespace ?? !isExplicit,
-      coerceCommaDecimals: options.coerceCommaDecimals ?? !isExplicit,
-      replaceCommaWithHyphen: Boolean(options.replaceCommaWithHyphen),
-      replaceNewlineWithPipe: options.replaceNewlineWithPipe ?? !isExplicit,
-      replaceDoubleQuotes: options.replaceDoubleQuotes ?? !isExplicit,
-      toLowerCase: Boolean(options.toLowerCase),
-    };
+  static runRule(dataframe: Dataframe, ruleId: string): ValidationRunResult {
+    if (ruleId === 'headers') return { proposals: this.validateHeaders(dataframe) };
+    if (ruleId === 'dates') return this.validateDates(dataframe);
+    const transform = CELL_TRANSFORMS[ruleId];
+    return { proposals: transform ? this.scanCells(dataframe, transform) : [] };
+  }
 
+  static scanCells(dataframe: Dataframe, transform: (val: string) => string): ValidationProposal[] {
     const proposals: ValidationProposal[] = [];
-    let idCounter = 0;
-
     const rows = dataframe.data;
     const height = Math.min(dataframe.height, rows.length);
     const width = dataframe.width;
-
-    const headers = new Array<string>(width);
-    const firstRow = rows[0];
-    for (let x = 0; x < width; x++) {
-      headers[x] = (firstRow && firstRow[x]) || `col_${x + 1}`;
-    }
 
     for (let y = 0; y < height; y++) {
       const row = rows[y];
@@ -47,128 +60,97 @@ export class DataValidator {
       const rowLen = Math.min(width, row.length);
       for (let x = 0; x < rowLen; x++) {
         const raw = row[x];
-        if (raw === undefined || raw === null) continue;
-        let cellText = String(raw);
-        if (cellText.length === 0) continue;
-
-        const headerName = headers[x];
-
-        // 1. Whitespace Trimming
-        if (opts.trimWhitespace && cellText !== cellText.trim()) {
-          const trimmed = cellText.trim();
-          proposals.push({
-            id: `val_ws_${x}_${y}_${idCounter++}`,
-            x,
-            y,
-            header: headerName,
-            oldValue: cellText,
-            newValue: trimmed,
-            category: 'WHITESPACE_TRIMMING',
-            categoryName: 'Whitespace/Trimming',
-            message: 'Removed leading and trailing whitespace',
-            status: 'pending'
-          });
-          cellText = trimmed;
+        if (!raw) continue;
+        const oldValue = String(raw);
+        const newValue = transform(oldValue);
+        if (newValue !== oldValue) {
+          proposals.push({ x, y, oldValue, newValue, status: 'pending' });
         }
+      }
+    }
+    return proposals;
+  }
 
-        if (cellText.length === 0) continue;
+  static validateHeaders(dataframe: Dataframe): ValidationProposal[] {
+    const proposals: ValidationProposal[] = [];
+    const seen = new Set<string>();
 
-        // 2. Data Type Coercion: European comma to dot for floating-point numbers
-        if (opts.coerceCommaDecimals && cellText.includes(',') && !Number.isFinite(Number(cellText))) {
-          const candidateNumber = cellText.replace(',', '.');
-          if (Number.isFinite(Number(candidateNumber))) {
-            proposals.push({
-              id: `val_num_${x}_${y}_${idCounter++}`,
-              x,
-              y,
-              header: headerName,
-              oldValue: cellText,
-              newValue: candidateNumber,
-              category: 'COMMA_DECIMAL_CONVERSION',
-              categoryName: 'Decimal Comma -> Dot',
-              message: 'Converted comma decimal separator to dot',
-              status: 'pending'
-            });
-            continue;
-          }
+    for (let x = 0; x < dataframe.width; x++) {
+      const oldValue = dataframe.get(x, 0);
+      const base = (oldValue || `col_${x + 1}`).toLowerCase().replace(/[^a-z0-9]/g, '_');
+      let candidate = base;
+      let suffix = 1;
+      while (seen.has(candidate)) {
+        candidate = `${base}_c${x + suffix++}`;
+      }
+      seen.add(candidate);
+      if (candidate !== oldValue) {
+        proposals.push({ x, y: 0, oldValue, newValue: candidate, status: 'pending' });
+      }
+    }
+    return proposals;
+  }
+
+  static validateDates(dataframe: Dataframe): ValidationRunResult {
+    const yfList: { x: number; y: number; year: number; month: number; day: number; raw: string }[] = [];
+    const ylList: { x: number; y: number; p1: number; p2: number; year: number; raw: string }[] = [];
+    let dayFirst = 0;
+    let monthFirst = 0;
+
+    const rows = dataframe.data;
+    const height = Math.min(dataframe.height, rows.length);
+    const width = dataframe.width;
+
+    for (let y = 0; y < height; y++) {
+      const row = rows[y];
+      if (!row) continue;
+      const rowLen = Math.min(width, row.length);
+      for (let x = 0; x < rowLen; x++) {
+        const val = row[x];
+        if (!val) continue;
+        const yf = parseYearFirstDate(val);
+        if (yf) {
+          yfList.push({ x, y, ...yf });
+          continue;
         }
-
-        // If it's already a valid number, skip character sanitization rules
-        if (Number.isFinite(Number(cellText))) continue;
-
-        // 3. Discrete Character Sanitization Rules
-        if (opts.replaceNewlineWithPipe && cellText.includes('\n')) {
-          const mutated = cellText.replaceAll('\n', '|');
-          proposals.push({
-            id: `val_nl_${x}_${y}_${idCounter++}`,
-            x,
-            y,
-            header: headerName,
-            oldValue: cellText,
-            newValue: mutated,
-            category: 'CONSTRAINT_RANGE_VIOLATION',
-            categoryName: 'Line Returns -> Pipe',
-            message: 'Replaced line returns with pipe (|)',
-            status: 'pending'
-          });
-          cellText = mutated;
+        const yl = parseDateCandidate(val);
+        if (yl) {
+          if (yl.p1 > 12) dayFirst++;
+          else if (yl.p2 > 12) monthFirst++;
+          ylList.push({ x, y, ...yl });
         }
+      }
+    }
 
-        if (opts.replaceDoubleQuotes && cellText.includes('"')) {
-          const mutated = cellText.replaceAll('"', '\'');
-          proposals.push({
-            id: `val_q_${x}_${y}_${idCounter++}`,
-            x,
-            y,
-            header: headerName,
-            oldValue: cellText,
-            newValue: mutated,
-            category: 'CONSTRAINT_RANGE_VIOLATION',
-            categoryName: 'Double Quotes -> Single',
-            message: 'Replaced double quotes with single quotes',
-            status: 'pending'
-          });
-          cellText = mutated;
-        }
+    if (yfList.length === 0 && ylList.length === 0) {
+      return { proposals: [], reason: 'no_dates' };
+    }
 
-        if (opts.replaceCommaWithHyphen && cellText.includes(',')) {
-          const mutated = cellText.replaceAll(',', '-');
-          proposals.push({
-            id: `val_cm_${x}_${y}_${idCounter++}`,
-            x,
-            y,
-            header: headerName,
-            oldValue: cellText,
-            newValue: mutated,
-            category: 'CONSTRAINT_RANGE_VIOLATION',
-            categoryName: 'Text Commas -> Dash',
-            message: 'Replaced commas with dash in text field',
-            status: 'pending'
-          });
-          cellText = mutated;
-        }
+    const proposals: ValidationProposal[] = [];
+    for (const c of yfList) {
+      const newValue = fmtIsoDate(c.year, c.month, c.day);
+      if (c.raw !== newValue) {
+        proposals.push({ x: c.x, y: c.y, oldValue: c.raw, newValue, status: 'pending' });
+      }
+    }
 
-        if (opts.toLowerCase) {
-          const mutated = cellText.toLowerCase();
-          if (mutated !== cellText) {
-            proposals.push({
-              id: `val_lc_${x}_${y}_${idCounter++}`,
-              x,
-              y,
-              header: headerName,
-              oldValue: cellText,
-              newValue: mutated,
-              category: 'CUSTOM_RULE_VIOLATION',
-              categoryName: 'Force Lowercase',
-              message: 'Converted text to lowercase',
-              status: 'pending'
-            });
-            cellText = mutated;
+    let reason: 'coexistence' | 'ambiguous' | undefined;
+    if (ylList.length > 0) {
+      if (dayFirst > 0 && monthFirst > 0) {
+        reason = 'coexistence';
+      } else if (dayFirst === 0 && monthFirst === 0) {
+        reason = 'ambiguous';
+      } else {
+        const isDayFirst = dayFirst > 0;
+        for (const c of ylList) {
+          const newValue = fmtIsoDate(c.year, isDayFirst ? c.p2 : c.p1, isDayFirst ? c.p1 : c.p2);
+          if (c.raw !== newValue) {
+            proposals.push({ x: c.x, y: c.y, oldValue: c.raw, newValue, status: 'pending' });
           }
         }
       }
     }
 
-    return proposals;
+    return { proposals, reason };
   }
 }
