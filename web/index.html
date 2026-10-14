@@ -97,6 +97,9 @@
 </head>
 
 <body>
+  <div id="standalone-pane">
+    <a id="standalone-open-btn" class="nav-button btn-install" href="/app/home.html">Open</a>
+  </div>
   <nav aria-label="Main Navigation">
     <a class="nav_element navTitleBlock" href="#"
       onclick="document.getElementById('container').scrollTo({ top: 0, behavior: 'smooth' });">
@@ -107,12 +110,12 @@
     <a class="nav_element hide_tablet" href="#about">About</a>
     <a class="nav_element hide_tablet" href="#features">Features</a>
     <div class="nav_element hide_phone" id="test-browser-nav">
-      <a class="nav-button btn-test-browser" href="/app/home.html" target="_blank">Test it in the browser</a>
+      <a class="nav-button btn-test-browser" href="/app/home.html" target="_blank" rel="noopener noreferrer">Test it in the browser</a>
     </div>
     <div class="nav_element" id="install">
-      <button class="nav-button btn-install">Install
+      <a id="install-btn" class="nav-button btn-install" href="/app/home.html" target="_blank" rel="noopener" role="button">Install
         <div id="version">Beta version</div>
-      </button>
+      </a>
     </div>
   </nav>
   <main id="container">
@@ -653,19 +656,20 @@
     registerSW({ immediate: true });
 
     const installContainer = document.getElementById('install');
-    const installButton = installContainer?.querySelector('button');
+    const installButton = document.getElementById('install-btn') || installContainer?.querySelector('a, button');
     const testBrowserNav = document.getElementById('test-browser-nav');
 
-    function openAppInBrowser(inPlace = false) {
-      if (inPlace) {
-        window.location.href = '/app/home.html';
-        return;
-      }
-      const win = window.open('/app/home.html', '_blank', 'noopener');
-      if (!win) {
-        window.location.href = '/app/home.html';
-      }
+    function openAppInBrowserTab(url = '/app/home.html') {
+      window.open(url, '_blank');
     }
+
+    // All links to /app/home.html except #install-btn and #standalone-open-btn open in a separate browser tab
+    document.querySelectorAll('a[href^="/app/home.html"]:not(#install-btn):not(#standalone-open-btn)').forEach((link) => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        openAppInBrowserTab(link.getAttribute('href') || '/app/home.html');
+      });
+    });
 
     let hintTimer = null;
     function showWebInstallHint() {
@@ -687,20 +691,30 @@
     }
 
     pwa.subscribe((state) => {
+      if (state.isStandalone || state.status === 'standalone') {
+        document.body.classList.add('is-standalone');
+        return;
+      }
+      document.body.classList.remove('is-standalone');
+
       if (!installButton) return;
 
-      if (state.status === 'standalone' || state.status === 'installed') {
-        if (testBrowserNav) testBrowserNav.style.display = 'none';
-        installButton.disabled = false;
+      if (state.status === 'installed') {
+        if (testBrowserNav) testBrowserNav.style.display = '';
+        installButton.removeAttribute('aria-disabled');
+        installButton.setAttribute('href', '/app/home.html');
+        installButton.setAttribute('target', '_blank');
+        installButton.setAttribute('rel', 'noopener');
         installButton.classList.remove('isMobileDnld');
-        installButton.innerHTML = 'Open App';
+        installButton.innerHTML = 'Open';
         document.getElementById('web-install-hint')?.classList.remove('visible');
         return;
       }
 
       if (state.status === 'unsupported-mobile') {
         if (testBrowserNav) testBrowserNav.style.display = 'none';
-        installButton.disabled = true;
+        installButton.setAttribute('aria-disabled', 'true');
+        installButton.removeAttribute('href');
         installButton.classList.add('isMobileDnld');
         installButton.innerHTML = 'Download available on Desktop only';
         return;
@@ -708,7 +722,8 @@
 
       if (state.status === 'unsupported-browser') {
         if (testBrowserNav) testBrowserNav.style.display = '';
-        installButton.disabled = true;
+        installButton.setAttribute('aria-disabled', 'true');
+        installButton.removeAttribute('href');
         installButton.classList.remove('isMobileDnld');
         installButton.innerHTML = 'Install available on Chrome & Edge';
         return;
@@ -716,28 +731,25 @@
 
       // 'installable-prompt' or 'installable-manual'
       if (testBrowserNav) testBrowserNav.style.display = '';
-      installButton.disabled = false;
+      installButton.removeAttribute('aria-disabled');
+      installButton.removeAttribute('href');
       installButton.classList.remove('isMobileDnld');
       installButton.innerHTML = 'Install<div id="version">Beta version</div>';
     });
 
     if (installButton) {
-      installButton.addEventListener('click', async () => {
+      installButton.addEventListener('click', async (e) => {
         const state = pwa.getState();
-        if (state.isStandalone) {
-          openAppInBrowser(true);
-          return;
-        }
         if (state.isInstalled) {
-          openAppInBrowser(false);
+          // Allow native <a href="/app/home.html" target="_blank" rel="noopener"> navigation
+          // so the browser's PWA link handler launches the standalone app window.
           return;
         }
+        e.preventDefault();
         if (!state.canInstall) return;
 
         const outcome = await pwa.promptInstall();
-        if (outcome === 'already-installed') {
-          openAppInBrowser(false);
-        } else if (outcome === 'manual') {
+        if (outcome === 'manual') {
           showWebInstallHint();
         }
       });

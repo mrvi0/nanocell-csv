@@ -308,18 +308,41 @@ header {
   border-color: var(--green);
 }
 
-.btn-install:hover:not(:disabled),
-#install .nav-button:hover:not(:disabled) {
+.btn-install:hover:not(:disabled):not([aria-disabled="true"]),
+#install .nav-button:hover:not(:disabled):not([aria-disabled="true"]) {
   box-shadow: var(--green) inset 0 0 2px;
 }
 
 .btn-install:disabled,
-#install .nav-button:disabled {
+.btn-install[aria-disabled="true"],
+#install .nav-button:disabled,
+#install .nav-button[aria-disabled="true"] {
   color: #64748b;
   border-color: #cbd5e1;
   background-color: #f8fafc;
   cursor: default;
   box-shadow: none;
+  pointer-events: none;
+}
+
+#standalone-pane {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background-color: #ffffff;
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (display-mode: standalone) {
+  #standalone-pane {
+    display: flex;
+  }
+}
+
+body.is-standalone #standalone-pane {
+  display: flex;
 }
 
 .web-install-hint {

@@ -92,18 +92,21 @@ export default defineConfig(({ command }) => ({
     generateHtmlPlugin(command),
     VitePWA({
       registerType: 'prompt',
+      injectRegister: false,
       includeAssets: ['**/*.{png,svg,webp,ico}'],
       workbox: {
         cacheId: appVersion,
         cleanupOutdatedCaches: true,
         navigateFallback: null,
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,ttf}']
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,ttf}'],
+        globIgnores: ['**/registerSW.js', '**/dev-dist/**']
       },
 
       // ENABLE PWA IN DEV MODE
       devOptions: {
         enabled: true,
-        type: 'module'
+        type: 'module',
+        suppressWarnings: true
       },
 
       manifest: {
