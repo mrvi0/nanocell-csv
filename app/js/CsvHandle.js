@@ -1,9 +1,9 @@
 import { Dataframe } from '../../core/Dataframe.js';
 import { CsvSerializer } from '../../core/Csv.js';
-import { getSheet, stg } from './state.js';
+import { getSheet, settings } from './state.js';
 import { Notification, showBrowserCompatibilityNotice } from './Notification.js';
 import { Sheet } from './Sheet.js';
-import CsvWorker from './csv_worker.js?worker';
+import CsvWorker from './csvWorker.js?worker';
 
 class CsvHandle {
   constructor(options = {}) {
@@ -19,8 +19,8 @@ class CsvHandle {
     this._launchingHandle = null;
     this._receivedMessageHandle = null;
     this.worker = options.worker !== undefined ? options.worker : (typeof Worker !== 'undefined' ? new CsvWorker() : null);
-    this.worker?.addEventListener('message', (e) => {
-      if (e?.data?.cmd === 'chunk_loaded') this.file_chunk_loaded(e.data);
+    this.worker?.addEventListener('message', (event) => {
+      if (event?.data?.cmd === 'chunk_loaded') this.onChunkLoaded(event.data);
     });
   }
 
@@ -67,13 +67,13 @@ class CsvHandle {
         }
       });
 
-      const prevent = (e) => e.preventDefault();
-      win.addEventListener('dragover', prevent);
-      win.addEventListener('dragenter', prevent);
-      win.addEventListener('dragleave', prevent);
-      win.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        const item = e.dataTransfer?.items?.[0];
+      const preventDefault = (event) => event.preventDefault();
+      win.addEventListener('dragover', preventDefault);
+      win.addEventListener('dragenter', preventDefault);
+      win.addEventListener('dragleave', preventDefault);
+      win.addEventListener('drop', async (event) => {
+        event.preventDefault();
+        const item = event.dataTransfer?.items?.[0];
         if (item && typeof item.getAsFileSystemHandle === 'function') {
           try {
             const handle = await item.getAsFileSystemHandle();
@@ -83,7 +83,7 @@ class CsvHandle {
             }
           } catch {}
         }
-        const file = e.dataTransfer?.files?.[0];
+        const file = event.dataTransfer?.files?.[0];
         if (file) this.loadFile(file, null);
       });
     }
@@ -91,80 +91,80 @@ class CsvHandle {
     try { win.opener?.postMessage?.({ type: 'nanocell:ready' }, '*'); } catch {}
   }
 
-  file_chunk_loaded(d) {
-    if (d.readId !== undefined && d.readId !== this.readId) return;
-    const fc = this.doc?.getElementById?.('footerCenter');
-    if (fc) fc.innerHTML = `${Math.round(d.status * 100)}%`;
+  onChunkLoaded(data) {
+    if (data.readId !== undefined && data.readId !== this.readId) return;
+    const footerCenter = this.doc?.getElementById?.('footer-center');
+    if (footerCenter) footerCenter.innerHTML = `${Math.round(data.status * 100)}%`;
 
-    const isFirst = d.isFirstChunk || (!this.isFirstChunkLoaded && d.chunk != null);
-    let s;
+    const isFirst = data.isFirstChunk || (!this.isFirstChunkLoaded && data.chunk != null);
+    let sheet;
 
     if (isFirst) {
       this.isFirstChunkLoaded = true;
-      s = this.createSheet(new Dataframe(d.chunk || [[]]));
-      s.df.isSaved = true;
-      s.df.lock = this.viewOnly;
-      s.fixTop = stg.set_headers;
+      sheet = this.createSheet(new Dataframe(data.chunk || [[]]));
+      sheet.df.isSaved = true;
+      sheet.df.lock = this.viewOnly;
+      sheet.fixTop = settings.freezeHeaderOnOpen;
     } else {
-      s = getSheet();
-      if (s?.df && d.chunk?.length > 0) {
-        s.df.appendRows(d.chunk, true);
-        if (this.viewOnly) s.df.isSaved = true;
-        s.scrollbarRefresh?.();
-        s.refresh?.();
+      sheet = getSheet();
+      if (sheet?.df && data.chunk?.length > 0) {
+        sheet.df.appendRows(data.chunk, true);
+        if (this.viewOnly) sheet.df.isSaved = true;
+        sheet.refreshScrollbars?.();
+        sheet.refresh?.();
       }
     }
 
-    if (d.status >= 1 || d.isComplete) {
+    if (data.status >= 1 || data.isComplete) {
       this.isReadComplete = true;
-      if (s) this.readSuccess(s);
+      if (sheet) this.onReadComplete(sheet);
     }
   }
 
-  readSuccess(s = getSheet()) {
-    if (!s) return;
-    if (stg.trim && !this.viewOnly) s.df.trimAll();
-    s.fixTop = stg.set_headers;
-    s.df.isSaved = true;
-    s.df.lock = this.viewOnly;
-    s.scrollbarRefresh?.();
-    s.refresh?.();
+  onReadComplete(sheet = getSheet()) {
+    if (!sheet) return;
+    if (settings.trim && !this.viewOnly) sheet.df.trimAll();
+    sheet.fixTop = settings.freezeHeaderOnOpen;
+    sheet.df.isSaved = true;
+    sheet.df.lock = this.viewOnly;
+    sheet.refreshScrollbars?.();
+    sheet.refresh?.();
   }
 
   read(file) {
     if (this.worker && this.readId > 0 && !this.isReadComplete) {
-      this.pipe('abort', {});
+      this.postToWorker('abort', {});
     }
     const currentReadId = ++this.readId;
     this.file = file;
     this.isFirstChunkLoaded = false;
     this.isReadComplete = false;
-    this.viewOnly = (file?.size ? file.size / 1000000 : 0) > Number(stg.editMaxFileSize);
+    this.viewOnly = (file?.size ? file.size / 1000000 : 0) > Number(settings.editMaxFileSize);
 
     if (!file || file.size == 0) {
-      this.file_chunk_loaded({
+      this.onChunkLoaded({
         cmd: 'chunk_loaded',
         readId: currentReadId,
         status: 1.0,
         chunk: [[]],
-        chunk_id: 1,
+        chunkId: 1,
         isFirstChunk: true,
         isComplete: true,
         viewOnly: this.viewOnly
       });
     } else {
-      this.pipe('read', {
+      this.postToWorker('read', {
         readId: currentReadId,
         file,
         viewOnly: this.viewOnly,
-        n_chunks: stg.vo_n_chunks,
-        n_rows: stg.vo_n_rows,
-        trimUnquoted: Boolean(stg.trim_unquoted)
+        previewChunks: settings.previewChunks,
+        previewRows: settings.previewRows,
+        trimUnquoted: Boolean(settings.trimUnquoted)
       });
     }
   }
 
-  pipe(cmd, data) {
+  postToWorker(cmd, data) {
     this.worker?.postMessage({ cmd, data });
   }
 
@@ -175,8 +175,8 @@ class CsvHandle {
     input.type = 'file';
     input.accept = '.csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain';
     input.style.display = 'none';
-    input.onchange = (e) => {
-      const file = e.target?.files?.[0];
+    input.onchange = (event) => {
+      const file = event.target?.files?.[0];
       if (file) this.loadFile(file, null);
       input.remove?.();
     };
@@ -260,7 +260,7 @@ class CsvHandle {
       const sheet = getSheet();
       if (!sheet) return;
       const writableStream = await this.handle.createWritable();
-      await writableStream.write(CsvHandle.from2D(sheet.df.data));
+      await writableStream.write(CsvHandle.serializeMatrix(sheet.df.data));
       await writableStream.close();
       sheet.df.isSaved = true;
       sheet.refresh?.();
@@ -277,18 +277,18 @@ class CsvHandle {
     const doc = this.doc;
     if (!sheet || !doc) return;
     try {
-      blob ||= new Blob([CsvHandle.from2D(sheet.df.data)], { type: 'text/csv;charset=utf-8;' });
+      blob ||= new Blob([CsvHandle.serializeMatrix(sheet.df.data)], { type: 'text/csv;charset=utf-8;' });
       filename ||= this.file?.name || 'export.csv';
       const url = URL.createObjectURL(blob);
-      const a = doc.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.style.display = 'none';
-      doc.body.appendChild(a);
-      a.click();
+      const anchor = doc.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.style.display = 'none';
+      doc.body.appendChild(anchor);
+      anchor.click();
       setTimeout(() => {
         URL.revokeObjectURL(url);
-        a.remove();
+        anchor.remove();
       }, 100);
       sheet.df.isSaved = true;
       sheet.refresh?.();
@@ -299,18 +299,18 @@ class CsvHandle {
     }
   }
 
-  _exportAs(ext, mime, serializeFn) {
+  _exportAs(extension, mimeType, serializeFn) {
     const sheet = getSheet();
     if (!sheet?.df) return Notification.quick('No active data to export.');
     const content = serializeFn(sheet.df.data);
-    const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const baseName = this.file?.name ? this.file.name.replace(/\.[^.]+$/, '') : 'export';
-    this.exportDownload(blob, `${baseName}.${ext}`);
+    this.exportDownload(blob, `${baseName}.${extension}`);
   }
 
   exportJson(pretty = true) {
     this._exportAs('json', 'application/json', (data) =>
-      new CsvSerializer().serializeJson(data, { pretty, hasHeader: Boolean(stg.set_headers) })
+      new CsvSerializer().serializeJson(data, { pretty, hasHeader: Boolean(settings.freezeHeaderOnOpen) })
     );
   }
 
@@ -322,18 +322,18 @@ class CsvHandle {
 
   exportMarkdown() {
     this._exportAs('md', 'text/markdown', (data) =>
-      new CsvSerializer().serializeMarkdown(data, { hasHeader: Boolean(stg.set_headers) })
+      new CsvSerializer().serializeMarkdown(data, { hasHeader: Boolean(settings.freezeHeaderOnOpen) })
     );
   }
 
-  async _copyFormatted(msg, serializeFn) {
+  async _copyFormatted(message, serializeFn) {
     const sheet = getSheet();
     if (!sheet) return;
-    const text = serializeFn(sheet.rangeArray());
+    const text = serializeFn(sheet.getSelectedMatrix());
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
-        Notification.quick(msg);
+        Notification.quick(message);
       }
     } catch (err) {
       console.warn('Clipboard copy failed:', err);
@@ -343,21 +343,21 @@ class CsvHandle {
 
   async copyMarkdown() {
     return this._copyFormatted('Copied selection as Markdown table', (rows) =>
-      new CsvSerializer().serializeMarkdown(rows, { hasHeader: Boolean(stg.set_headers) })
+      new CsvSerializer().serializeMarkdown(rows, { hasHeader: Boolean(settings.freezeHeaderOnOpen) })
     );
   }
 
   async copyJson() {
     return this._copyFormatted('Copied selection as JSON to clipboard', (rows) =>
-      new CsvSerializer().serializeJson(rows, { pretty: true, hasHeader: Boolean(stg.set_headers) })
+      new CsvSerializer().serializeJson(rows, { pretty: true, hasHeader: Boolean(settings.freezeHeaderOnOpen) })
     );
   }
 
-  static from2D(matrix) {
+  static serializeMatrix(matrix) {
     return new CsvSerializer({
-      delimiter: stg.delimiter === 'TAB' ? '\t' : stg.delimiter,
-      isStrict: stg.save_strict,
-      fixedWidth: stg.save_fixed_width_size
+      delimiter: settings.delimiter === 'TAB' ? '\t' : settings.delimiter,
+      isStrict: settings.strictSave,
+      fixedWidth: settings.fixedWidthSize
     }).serialize(matrix);
   }
 }

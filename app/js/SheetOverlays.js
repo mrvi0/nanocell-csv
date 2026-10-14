@@ -18,10 +18,10 @@ class FloatingToolbar extends BaseElement {
     this.widget = document.createElement('div');
     this.widget.className = `finder-widget floating-panel ${extraClass}`.trim();
     this.appendChild(this.widget);
-    this.widget.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab') {
-        e.stopPropagation();
-        DialogManager.cycleFocus(e, this.getFocusableElements());
+    this.widget.addEventListener('keydown', (event) => {
+      if (event.key === 'Tab') {
+        event.stopPropagation();
+        DialogManager.cycleFocus(event, this.getFocusableElements());
       }
     });
   }
@@ -29,12 +29,12 @@ class FloatingToolbar extends BaseElement {
   get activeSheet() { return this.sheet || getSheet(); }
   get isOpen() { return this.classList.contains('open') || this.hasAttribute('open'); }
 
-  bindCaseToggle(btn, onToggle) {
-    setIcon(btn, 'match_case');
-    btn.addEventListener('click', () => {
+  bindCaseToggle(button, onToggle) {
+    setIcon(button, 'match_case');
+    button.addEventListener('click', () => {
       this.matchCase = !this.matchCase;
-      btn.setAttribute('aria-pressed', this.matchCase ? 'true' : 'false');
-      btn.classList.toggle('active', this.matchCase);
+      button.setAttribute('aria-pressed', this.matchCase ? 'true' : 'false');
+      button.classList.toggle('active', this.matchCase);
       onToggle();
     });
   }
@@ -58,11 +58,11 @@ class FloatingToolbar extends BaseElement {
 export class FinderDialog extends FloatingToolbar {
   constructor(sheet) {
     super(sheet);
-    this.found = [];
-    this.search = '';
-    this.lastSearch = '';
-    this.idx = 0;
-    this.advanced = false;
+    this.matches = [];
+    this.query = '';
+    this.lastQuery = '';
+    this.currentIndex = 0;
+    this.isAdvanced = false;
 
     this.widget.innerHTML = `
       <div class="finder-row find-row">
@@ -89,9 +89,9 @@ export class FinderDialog extends FloatingToolbar {
       </div>
     `;
 
-    this.findIn = this.widget.querySelector('.find-input');
-    this.replaceIn = this.widget.querySelector('.replace-input');
-    this.foundInfo = this.widget.querySelector('.finder-count-badge');
+    this.findInput = this.widget.querySelector('.find-input');
+    this.replaceInput = this.widget.querySelector('.replace-input');
+    this.matchBadge = this.widget.querySelector('.finder-count-badge');
     this.caseBtn = this.widget.querySelector('.case-btn');
     this.toggleBtn = this.widget.querySelector('.finder-toggle-btn');
     this.prevBtn = this.widget.querySelector('.prev-btn');
@@ -107,15 +107,15 @@ export class FinderDialog extends FloatingToolbar {
     setIcon(this.replaceBtn, 'find_replace');
 
     this.bindCaseToggle(this.caseBtn, () => this.find(true));
-    this.findIn.addEventListener('input', () => this.find());
-    this.foundInfo.addEventListener('click', () => this.findNext());
-    this.findIn.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); this.close(); }
-      else if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? this.findPrev() : this.findNext(); }
+    this.findInput.addEventListener('input', () => this.find());
+    this.matchBadge.addEventListener('click', () => this.findNext());
+    this.findInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); this.close(); }
+      else if (event.key === 'Enter') { event.preventDefault(); event.shiftKey ? this.findPrev() : this.findNext(); }
     });
-    this.replaceIn.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); this.close(); }
-      else if (e.key === 'Enter') { e.preventDefault(); this.replaceAll(); }
+    this.replaceInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); this.close(); }
+      else if (event.key === 'Enter') { event.preventDefault(); this.replaceAll(); }
     });
     this.toggleBtn.addEventListener('click', () => this.toggleReplaceRow());
     this.prevBtn.addEventListener('click', () => this.findPrev());
@@ -125,71 +125,73 @@ export class FinderDialog extends FloatingToolbar {
   }
 
   getFocusableElements() {
-    const list = [this.toggleBtn, this.findIn, this.caseBtn, this.prevBtn, this.nextBtn, this.closeBtn];
-    if (this.replaceRow && !this.replaceRow.classList.contains('hidden')) list.push(this.replaceIn, this.replaceBtn);
+    const list = [this.toggleBtn, this.findInput, this.caseBtn, this.prevBtn, this.nextBtn, this.closeBtn];
+    if (this.replaceRow && !this.replaceRow.classList.contains('hidden')) list.push(this.replaceInput, this.replaceBtn);
     return list.filter(el => el && !el.disabled && !el.hidden && !el.classList.contains('hidden') && el.style.display !== 'none');
   }
 
   toggleReplaceRow(show = this.replaceRow.classList.contains('hidden')) {
     this.replaceRow.classList.toggle('hidden', !show);
     this.toggleBtn.classList.toggle('expanded', show);
-    this.advanced = Boolean(show);
-    if (!show && (document.activeElement === this.replaceIn || document.activeElement === this.replaceBtn)) {
-      this.findIn.focus();
+    this.isAdvanced = Boolean(show);
+    if (!show && (document.activeElement === this.replaceInput || document.activeElement === this.replaceBtn)) {
+      this.findInput.focus();
     }
   }
 
-  find(force = false) {
+  find(forceRecompute = false) {
     const activeSheet = this.activeSheet;
-    this.search = this.findIn.value;
+    this.query = this.findInput.value;
 
-    if (!this.search) {
-      this.lastSearch = '';
-      this.found = [];
-      this.idx = 0;
-    } else if (this.lastSearch === this.search && !force) {
-      if (this.found.length > 0) this.idx = (this.idx + 1) % this.found.length;
+    if (!this.query) {
+      this.lastQuery = '';
+      this.matches = [];
+      this.currentIndex = 0;
+    } else if (this.lastQuery === this.query && !forceRecompute) {
+      if (this.matches.length > 0) this.currentIndex = (this.currentIndex + 1) % this.matches.length;
     } else {
-      this.lastSearch = this.search;
-      this.idx = 0;
-      this.found = activeSheet?.df ? activeSheet.df.find({ term: this.search, caseSensitive: this.matchCase }) : [];
+      this.lastQuery = this.query;
+      this.currentIndex = 0;
+      this.matches = activeSheet?.df ? activeSheet.df.find({ term: this.query, caseSensitive: this.matchCase }) : [];
     }
 
-    this.foundInfo.innerHTML = this.found.length === 0 ? 'No match' : `${this.idx + 1} / ${this.found.length}`;
-    if (this.found.length > 0 && activeSheet) {
-      activeSheet.focus_cell(this.found[this.idx].x, this.found[this.idx].y);
+    this.matchBadge.innerHTML = this.matches.length === 0 ? 'No match' : `${this.currentIndex + 1} / ${this.matches.length}`;
+    if (this.matches.length > 0 && activeSheet) {
+      const match = this.matches[this.currentIndex];
+      activeSheet.focusCell(match.x, match.y);
     }
   }
 
   findNext() {
-    this.find(this.search !== this.findIn.value || this.found.length === 0);
+    this.find(this.query !== this.findInput.value || this.matches.length === 0);
   }
 
   findPrev() {
-    if (this.search !== this.findIn.value || this.found.length === 0) return this.find(true);
-    if (this.found.length > 0) {
-      this.idx = (this.idx - 1 + this.found.length) % this.found.length;
-      this.foundInfo.innerHTML = `${this.idx + 1} / ${this.found.length}`;
-      this.activeSheet?.focus_cell(this.found[this.idx].x, this.found[this.idx].y);
+    if (this.query !== this.findInput.value || this.matches.length === 0) return this.find(true);
+    if (this.matches.length > 0) {
+      this.currentIndex = (this.currentIndex - 1 + this.matches.length) % this.matches.length;
+      this.matchBadge.innerHTML = `${this.currentIndex + 1} / ${this.matches.length}`;
+      const match = this.matches[this.currentIndex];
+      this.activeSheet?.focusCell(match.x, match.y);
     }
   }
 
   replaceAll() {
-    if (!this.search) return;
+    if (!this.query) return;
     const activeSheet = this.activeSheet;
     if (!activeSheet?.df) return;
 
-    activeSheet.df.replaceAll({ term: this.search, caseSensitive: this.matchCase }, this.replaceIn.value);
+    activeSheet.df.replaceAll({ term: this.query, caseSensitive: this.matchCase }, this.replaceInput.value);
     activeSheet.refresh();
-    activeSheet.slctRefresh(true);
+    activeSheet.refreshSelection(true);
     this.find(true);
   }
 
-  findMenu(prefill = '', adv = false) {
-    this.toggleReplaceRow(adv);
-    if (prefill) this.findIn.value = prefill;
+  open(prefill = '', isAdvanced = false) {
+    this.toggleReplaceRow(isAdvanced);
+    if (prefill) this.findInput.value = prefill;
     this.showOverlay();
-    this.findIn.focus();
+    this.findInput.focus();
     if (prefill) this.find(true);
   }
 
@@ -242,9 +244,9 @@ export class FilterDialog extends FloatingToolbar {
     this.applyBtn.addEventListener('click', () => this.applyFilter());
     this.closeBtn.addEventListener('click', () => this.close());
 
-    const handleKeydown = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.close(); }
-      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); this.applyFilter(); }
+    const handleKeydown = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.close(); }
+      else if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); this.applyFilter(); }
     };
 
     this.filterInput.addEventListener('keydown', handleKeydown);
@@ -296,8 +298,8 @@ export class FilterDialog extends FloatingToolbar {
 
     this._previousLock ??= Boolean(activeSheet.df.lock);
     activeSheet.df.lock = true;
-    if (activeSheet.inputing) activeSheet.inputBlur?.();
-    activeSheet.footerUpdate?.();
+    if (activeSheet.isEditing) activeSheet.commitEdit?.();
+    activeSheet.updateFooter?.();
 
     const maxCols = Math.max(1, activeSheet.df.width);
     this.colInput.min = 1;
@@ -320,7 +322,7 @@ export class FilterDialog extends FloatingToolbar {
       if (activeSheet.df) activeSheet.df.lock = this._previousLock ?? false;
       this._previousLock = null;
       activeSheet.refresh?.();
-      activeSheet.slctRefresh?.(true);
+      activeSheet.refreshSelection?.(true);
     }
     this.countBadge.textContent = '';
   }

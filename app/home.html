@@ -13,24 +13,24 @@
   <script>
     (function() {
       try {
-        const t = localStorage.getItem('theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'nord' : 'light');
-        document.documentElement.setAttribute('data-theme', t);
-      } catch(e) { console.warn('Theme preference init failed:', e); }
+        const theme = localStorage.getItem('theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'nord' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (err) { console.warn('Theme preference init failed:', err); }
     })();
   </script>
 </head>
 
-<body id="body" class="flexCol">
+<body id="body" class="flex-col">
   <header id="header"></header>
-  <div id="content" class="flexMain">
+  <div id="content" class="flex-main">
     <div id="main-container"></div>
     <ui-validation-pane id="validation-pane"></ui-validation-pane>
   </div>
   <footer>
     <section id="footer">
-      <section id="footerLeft">Left</section>
-      <section id="footerCenter" class="flexMain">Center</section>
-      <section id="footerRight">Right</section>
+      <section id="footer-left">Left</section>
+      <section id="footer-center" class="flex-main">Center</section>
+      <section id="footer-right">Right</section>
       <span id="lock" class="icon" role="img" aria-label="editing file" data-src="edit_square"></span>
     </section>
   </footer>

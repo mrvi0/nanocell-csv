@@ -3,27 +3,27 @@ import { CsvParser, SeparatorDetector } from '../../core/Csv.js';
 const CHUNK_SIZE = 500 * 1000;
 let currentAbort = false;
 
-function csv_parse(s, delimiter = ',', trimUnquotedWhitespace = false, commentChar = '', escapeChar = '"') {
-  if (!s) return [];
-  return new CsvParser({ delimiter, trimUnquotedWhitespace, commentChar, escapeChar }).parseChunk(s, true);
+function parseCsv(text, delimiter = ',', trimUnquotedWhitespace = false, commentChar = '', escapeChar = '"') {
+  if (!text) return [];
+  return new CsvParser({ delimiter, trimUnquotedWhitespace, commentChar, escapeChar }).parseChunk(text, true);
 }
 
-function postWorkerMessage(msg) {
-  if (typeof self !== 'undefined' && typeof self.postMessage === 'function') self.postMessage(msg);
-  else if (typeof globalThis !== 'undefined' && typeof globalThis.postMessage === 'function') globalThis.postMessage(msg);
+function postWorkerMessage(message) {
+  if (typeof self !== 'undefined' && typeof self.postMessage === 'function') self.postMessage(message);
+  else if (typeof globalThis !== 'undefined' && typeof globalThis.postMessage === 'function') globalThis.postMessage(message);
 }
 
 const ReaderClass = typeof FileReader !== 'undefined' ? FileReader : class {
   readAsArrayBuffer(blob) {
-    Promise.resolve(blob.arrayBuffer()).then(res => this.onloadend?.({ target: { result: res } }));
+    Promise.resolve(blob.arrayBuffer()).then(result => this.onloadend?.({ target: { result } }));
   }
   readAsText(blob) {
-    Promise.resolve(blob.text()).then(res => this.onloadend?.({ target: { result: res } }));
+    Promise.resolve(blob.text()).then(result => this.onloadend?.({ target: { result } }));
   }
 };
 
-function loadcsv(data, postFn = postWorkerMessage) {
-  if (data.viewOnly) return load_csv_view_only(data, postFn);
+function loadCsv(data, postFn = postWorkerMessage) {
+  if (data.viewOnly) return loadCsvViewOnly(data, postFn);
   const file = data.file;
   const fileSize = file ? file.size : 0;
   const readId = data.readId;
@@ -37,7 +37,7 @@ function loadcsv(data, postFn = postWorkerMessage) {
       readId,
       status: 1.0,
       chunk: [[]],
-      chunk_id: 1,
+      chunkId: 1,
       isFirstChunk: true,
       isComplete: true,
       viewOnly: false,
@@ -55,7 +55,7 @@ function loadcsv(data, postFn = postWorkerMessage) {
   const textDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8', { fatal: false }) : null;
   const reader = new ReaderClass();
 
-  const emit = (rows, isFirst, isComplete, currentStatus) => {
+  const emitChunk = (rows, isFirst, isComplete, currentStatus) => {
     iteration++;
     totalRowsEmitted += rows.length;
     postFn({
@@ -63,7 +63,7 @@ function loadcsv(data, postFn = postWorkerMessage) {
       readId,
       status: isComplete ? 1.0 : currentStatus,
       chunk: rows,
-      chunk_id: iteration,
+      chunkId: iteration,
       isFirstChunk: isFirst,
       isComplete,
       viewOnly: false,
@@ -72,12 +72,12 @@ function loadcsv(data, postFn = postWorkerMessage) {
     });
   };
 
-  reader.onloadend = (e) => {
+  reader.onloadend = (event) => {
     if (currentAbort) return;
     const isFileReadComplete = offset >= fileSize;
-    const rawText = (textDecoder && e.target.result instanceof ArrayBuffer)
-      ? textDecoder.decode(e.target.result, { stream: !isFileReadComplete })
-      : (e.target.result || '');
+    const rawText = (textDecoder && event.target.result instanceof ArrayBuffer)
+      ? textDecoder.decode(event.target.result, { stream: !isFileReadComplete })
+      : (event.target.result || '');
 
     if (!sepDetected && rawText.length > 0) {
       sep = SeparatorDetector.detect(rawText);
@@ -97,7 +97,7 @@ function loadcsv(data, postFn = postWorkerMessage) {
         const firstChunkRows = pendingRows.slice(pendingOffset, pendingOffset + chunkSize);
         pendingOffset += chunkSize;
         firstChunkEmitted = true;
-        emit(firstChunkRows, true, isFileReadComplete && pendingOffset >= pendingRows.length, currentStatus);
+        emitChunk(firstChunkRows, true, isFileReadComplete && pendingOffset >= pendingRows.length, currentStatus);
       }
     }
 
@@ -106,7 +106,7 @@ function loadcsv(data, postFn = postWorkerMessage) {
       const chunkSize = isFileReadComplete ? remaining : 2000;
       const chunkRows = pendingRows.slice(pendingOffset, pendingOffset + chunkSize);
       pendingOffset += chunkSize;
-      emit(chunkRows, false, isFileReadComplete && pendingOffset >= pendingRows.length, currentStatus);
+      emitChunk(chunkRows, false, isFileReadComplete && pendingOffset >= pendingRows.length, currentStatus);
     }
 
     if (pendingOffset >= pendingRows.length) {
@@ -117,10 +117,10 @@ function loadcsv(data, postFn = postWorkerMessage) {
       pendingOffset = 0;
     }
 
-    if (offset < fileSize && !currentAbort) seek();
+    if (offset < fileSize && !currentAbort) readNextSlice();
   };
 
-  function seek() {
+  function readNextSlice() {
     if (currentAbort || (offset >= fileSize && iteration > 0 && pendingRows.length === 0)) return;
     const nextSize = Math.min(CHUNK_SIZE, fileSize - offset);
     const chunkBlob = file.slice(offset, offset + nextSize);
@@ -129,33 +129,33 @@ function loadcsv(data, postFn = postWorkerMessage) {
     else reader.readAsText(chunkBlob, 'utf-8');
   }
 
-  seek();
+  readNextSlice();
 }
 
-function load_csv_view_only(data, postFn = postWorkerMessage) {
+function loadCsvViewOnly(data, postFn = postWorkerMessage) {
   const file = data.file, readId = data.readId;
   const fileSize = file ? file.size : 0;
   let sep = ',', iteration = 0;
   const reader = new ReaderClass();
-  const vo_n_chunks = data.n_chunks || 1;
-  const vo_n_rows = data.n_rows || 100;
+  const previewChunks = data.previewChunks || 1;
+  const previewRows = data.previewRows || 100;
   const trimUnquoted = Boolean(data.trimUnquoted);
   const commentChar = data.commentChar || '';
   const escapeChar = data.escapeChar || '"';
 
-  reader.onloadend = (e) => {
+  reader.onloadend = (event) => {
     if (currentAbort) return;
-    let result = e.target.result || '';
+    let result = event.target.result || '';
     if (iteration === 1) {
       sep = SeparatorDetector.detect(result);
     } else {
-      const firstNl = result.indexOf('\n');
-      if (firstNl !== -1 && firstNl < result.length - 1) result = result.slice(firstNl + 1);
+      const firstNewline = result.indexOf('\n');
+      if (firstNewline !== -1 && firstNewline < result.length - 1) result = result.slice(firstNewline + 1);
     }
-    let matrix = csv_parse(result, sep, trimUnquoted, commentChar, escapeChar);
+    let matrix = parseCsv(result, sep, trimUnquoted, commentChar, escapeChar);
     matrix = iteration === 1
-      ? matrix.slice(0, vo_n_rows)
-      : (iteration === vo_n_chunks ? matrix.slice(-vo_n_rows) : matrix.slice(1, vo_n_rows + 1));
+      ? matrix.slice(0, previewRows)
+      : (iteration === previewChunks ? matrix.slice(-previewRows) : matrix.slice(1, previewRows + 1));
 
     if (iteration !== 1) {
       const colCount = matrix[0]?.length || 1;
@@ -165,42 +165,42 @@ function load_csv_view_only(data, postFn = postWorkerMessage) {
     postFn({
       cmd: 'chunk_loaded',
       readId,
-      status: iteration / vo_n_chunks,
+      status: iteration / previewChunks,
       chunk: matrix,
-      chunk_id: iteration,
+      chunkId: iteration,
       isFirstChunk: iteration === 1,
-      isComplete: iteration === vo_n_chunks,
+      isComplete: iteration === previewChunks,
       viewOnly: true,
       sep,
       rowCount: 0
     });
-    if (iteration < vo_n_chunks && !currentAbort) seek();
+    if (iteration < previewChunks && !currentAbort) readNextSlice();
   };
 
-  function seek() {
+  function readNextSlice() {
     if (currentAbort) return;
     iteration++;
-    const offset = (iteration - 1) * (fileSize / vo_n_chunks);
-    const slice = iteration === vo_n_chunks
+    const offset = (iteration - 1) * (fileSize / previewChunks);
+    const slice = iteration === previewChunks
       ? file.slice(Math.max(0, fileSize - CHUNK_SIZE), fileSize)
       : file.slice(offset, Math.min(fileSize, offset + CHUNK_SIZE));
     reader.readAsText(slice, 'utf-8');
   }
 
-  seek();
+  readNextSlice();
 }
 
 if (typeof self !== 'undefined' && typeof self.addEventListener === 'function') {
-  self.addEventListener('message', (e) => {
-    if (!e.data) return;
-    if (e.data.cmd === 'read') {
+  self.addEventListener('message', (event) => {
+    if (!event.data) return;
+    if (event.data.cmd === 'read') {
       currentAbort = false;
-      loadcsv(e.data.data);
-    } else if (e.data.cmd === 'abort' || e.data.cmd === 'cancel') {
+      loadCsv(event.data.data);
+    } else if (event.data.cmd === 'abort' || event.data.cmd === 'cancel') {
       currentAbort = true;
     }
   });
 }
 
-export { csv_parse, loadcsv, load_csv_view_only };
+export { parseCsv, loadCsv, loadCsvViewOnly };
 export default class CsvWorkerFallback {}

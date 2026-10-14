@@ -116,46 +116,46 @@ export class ValidationPane extends BaseElement {
       if (this.view === 'detail') this.renderVirtualWindow();
     }, { passive: true });
 
-    this.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
+    this.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
         this.handleBack();
       }
     });
 
-    this.rulesView?.addEventListener('click', (e) => {
-      const ruleId = e.target.closest('.validation-rule-card')?.dataset.ruleId;
+    this.rulesView?.addEventListener('click', (event) => {
+      const ruleId = event.target.closest('.validation-rule-card')?.dataset.ruleId;
       if (ruleId) this.runRule(ruleId);
     });
 
-    this.columnsView?.addEventListener('click', (e) => {
-      const btn = e.target.closest('.validation-btn');
-      if (btn) {
-        e.stopPropagation();
-        const col = parseInt(btn.dataset.col, 10);
+    this.columnsView?.addEventListener('click', (event) => {
+      const button = event.target.closest('.validation-btn');
+      if (button) {
+        event.stopPropagation();
+        const col = parseInt(button.dataset.col, 10);
         if (!Number.isNaN(col)) {
-          if (btn.classList.contains('col-accept-btn')) this.resolveItems(this.getPendingItems(col), true);
-          else if (btn.classList.contains('col-reject-btn')) this.resolveItems(this.getPendingItems(col), false);
-          else if (btn.classList.contains('col-inspect-btn')) this.showDetail(col);
+          if (button.classList.contains('col-accept-btn')) this.resolveItems(this.getPendingItems(col), true);
+          else if (button.classList.contains('col-reject-btn')) this.resolveItems(this.getPendingItems(col), false);
+          else if (button.classList.contains('col-inspect-btn')) this.showDetail(col);
         }
         return;
       }
-      const card = e.target.closest('.validation-col-card');
+      const card = event.target.closest('.validation-col-card');
       if (card) this.showDetail(parseInt(card.dataset.col, 10));
     });
 
-    this.virtualContent?.addEventListener('click', (e) => {
-      const card = e.target.closest('.validation-item');
+    this.virtualContent?.addEventListener('click', (event) => {
+      const card = event.target.closest('.validation-item');
       if (!card) return;
       const item = this.colItems[parseInt(card.dataset.idx, 10)];
       if (!item) return;
 
-      const btn = e.target.closest('.validation-btn');
-      if (btn) {
-        e.stopPropagation();
-        if (btn.classList.contains('item-accept-btn')) this.resolveItems([item], true);
-        else if (btn.classList.contains('item-reject-btn')) this.resolveItems([item], false);
+      const button = event.target.closest('.validation-btn');
+      if (button) {
+        event.stopPropagation();
+        if (button.classList.contains('item-accept-btn')) this.resolveItems([item], true);
+        else if (button.classList.contains('item-reject-btn')) this.resolveItems([item], false);
         return;
       }
       this.handleItemClick(item, card);
@@ -221,10 +221,10 @@ export class ValidationPane extends BaseElement {
 
   runRule(ruleId) {
     this.init();
-    const s = getSheet();
-    if (!s?.df) return;
+    const sheet = getSheet();
+    if (!sheet?.df) return;
 
-    if (s.df.lock) {
+    if (sheet.df.lock) {
       Notification.warning('File is in View-Only mode. Edits are disabled.', 'Validation');
       return;
     }
@@ -232,7 +232,7 @@ export class ValidationPane extends BaseElement {
     const rule = VALIDATION_RULES.find(r => r.id === ruleId);
     if (!rule) return;
 
-    const { proposals, reason } = DataValidator.runRule(s.df, ruleId);
+    const { proposals, reason } = DataValidator.runRule(sheet.df, ruleId);
     if (reason === 'coexistence') {
       Notification.warning("Both 'dd-mm-YYYY' and 'mm-dd-YYYY' formats coexist in the file.", 'Date Validation');
     } else if (reason === 'ambiguous') {
@@ -383,9 +383,9 @@ export class ValidationPane extends BaseElement {
   resolveItems(itemsList, accept) {
     if (!itemsList || itemsList.length === 0) return;
     if (accept) {
-      const s = getSheet();
-      if (s?.df) {
-        if (s.df.lock) {
+      const sheet = getSheet();
+      if (sheet?.df) {
+        if (sheet.df.lock) {
           Notification.warning('File is in View-Only mode. Edits are disabled.', 'Validation');
           return;
         }
@@ -397,13 +397,13 @@ export class ValidationPane extends BaseElement {
         }));
         const txTimestamp = Math.max(Date.now(), (this._lastTxTimestamp || 0) + 105);
         this._lastTxTimestamp = txTimestamp;
-        s.df.create({ type: 'RANGE_EDIT', timestamp: txTimestamp, payload: { changes } });
+        sheet.df.create({ type: 'RANGE_EDIT', timestamp: txTimestamp, payload: { changes } });
       }
       for (const item of itemsList) item.status = 'accepted';
-      const s2 = getSheet();
-      if (s2) {
-        s2.reload?.();
-        s2.slctRefresh?.(true);
+      const activeSheet = getSheet();
+      if (activeSheet) {
+        activeSheet.reload?.();
+        activeSheet.refreshSelection?.(true);
       }
     } else {
       for (const item of itemsList) item.status = 'rejected';
@@ -452,9 +452,9 @@ export class ValidationPane extends BaseElement {
       html += `
         <div class="validation-item ${this.selectedItem === item ? 'selected' : ''}" data-idx="${i}">
           <div class="validation-item-diff">
-            <span class="diff-old" title="${escapeHtml(item.oldValue)}">${this.formatVal(item.oldValue)}</span>
+            <span class="diff-old" title="${escapeHtml(item.oldValue)}">${this.formatValue(item.oldValue)}</span>
             <span class="diff-arrow">&rarr;</span>
-            <span class="diff-new" title="${escapeHtml(item.newValue)}">${this.formatVal(item.newValue)}</span>
+            <span class="diff-new" title="${escapeHtml(item.newValue)}">${this.formatValue(item.newValue)}</span>
           </div>
           <div class="validation-item-actions">
             <button class="icon validation-btn item-accept-btn" type="button" title="Accept edit" aria-label="Accept edit" data-icon="on"></button>
@@ -470,16 +470,16 @@ export class ValidationPane extends BaseElement {
   handleItemClick(item, cardEl) {
     this.selectedItem = item;
     if (this.virtualContent) {
-      for (const c of this.virtualContent.querySelectorAll('.validation-item')) {
-        c.classList.toggle('selected', c === cardEl);
+      for (const card of this.virtualContent.querySelectorAll('.validation-item')) {
+        card.classList.toggle('selected', card === cardEl);
       }
     }
-    getSheet()?.focus_cell?.(item.x, item.y);
+    getSheet()?.focusCell?.(item.x, item.y);
   }
 
-  formatVal(val) {
-    if (val === undefined || val === null || val === '') return '<em>empty</em>';
-    const escaped = escapeHtml(val);
+  formatValue(value) {
+    if (value === undefined || value === null || value === '') return '<em>empty</em>';
+    const escaped = escapeHtml(value);
     return escaped.includes('\n') ? escaped.replace(/\n/g, '\\n') : escaped;
   }
 }

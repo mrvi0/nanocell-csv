@@ -4,56 +4,57 @@ import { env, pwa } from './state.js';
 const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
 class Notification extends BaseElement {
-  constructor(txt, opt = {}) {
+  constructor(message, options = {}) {
     super();
-    this.txt = txt;
-    this.opt = opt;
+    this.message = message;
+    this.options = options;
 
     this.content = document.createElement('div');
     this.content.className = 'ui-msg-text';
-    if (txt instanceof HTMLElement) {
-      this.content.appendChild(txt);
-    } else if (opt.allowHtml && typeof txt === 'string') {
-      this.content.innerHTML = txt;
+    if (message instanceof HTMLElement) {
+      this.content.appendChild(message);
+    } else if (options.allowHtml && typeof message === 'string') {
+      this.content.innerHTML = message;
     } else {
-      this.content.innerText = txt ?? '';
+      this.content.innerText = message ?? '';
     }
 
-    const mkBtn = (cls, icon, label, fn) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = `${cls} icon`;
-      b.setAttribute('aria-label', label);
-      b.title = label;
-      setIcon(b, icon);
-      b.onclick = fn;
-      b.onkeydown = (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          fn();
+    const createButton = (className, iconName, label, onClick) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `${className} icon`;
+      button.setAttribute('aria-label', label);
+      button.title = label;
+      setIcon(button, iconName);
+      button.onclick = onClick;
+      button.onkeydown = (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          onClick();
         }
       };
-      return b;
+      return button;
     };
 
-    this.ok = mkBtn('ui-msg-ok', 'on', opt.okText || 'Confirm', () => this.resolve(true));
-    this.cancel = mkBtn('ui-msg-cancel', 'off', opt.cancelText || 'Cancel', () => this.resolve(false));
-    this.closeBtn = mkBtn('ui-toast-close-btn', 'off', 'Dismiss notification', () => this.dismiss());
+    this.okBtn = createButton('ui-msg-ok', 'on', options.okText || 'Confirm', () => this.resolve(true));
+    this.cancelBtn = createButton('ui-msg-cancel', 'off', options.cancelText || 'Cancel', () => this.resolve(false));
+    this.closeBtn = createButton('ui-toast-close-btn', 'off', 'Dismiss notification', () => this.dismiss());
 
-    this.keyHandler = (e) => {
+    this.keyHandler = (event) => {
       if (!this.isConnected) return;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        this.opt.id === 3 ? this.resolve(false) : this.dismiss();
-      } else if (e.key === 'Enter' && this.opt.id === 3 && document.activeElement !== this.cancel) {
-        e.preventDefault();
-        e.stopPropagation();
+      const isChoice = this.options.mode === 'choice';
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        isChoice ? this.resolve(false) : this.dismiss();
+      } else if (event.key === 'Enter' && isChoice && document.activeElement !== this.cancelBtn) {
+        event.preventDefault();
+        event.stopPropagation();
         this.resolve(true);
-      } else if (e.key === 'Tab' && this.opt.id === 3) {
-        e.preventDefault();
-        (document.activeElement === this.cancel ? this.ok : this.cancel).focus();
+      } else if (event.key === 'Tab' && isChoice) {
+        event.preventDefault();
+        (document.activeElement === this.cancelBtn ? this.okBtn : this.cancelBtn).focus();
       }
     };
   }
@@ -61,7 +62,7 @@ class Notification extends BaseElement {
   connectedCallback() {
     if (this._initialized) return;
     this._initialized = true;
-    this.setAttribute('role', this.opt.id === 3 ? 'alertdialog' : 'status');
+    this.setAttribute('role', this.options.mode === 'choice' ? 'alertdialog' : 'status');
     this.setAttribute('aria-live', 'polite');
     this.renderToast();
     document.addEventListener('keydown', this.keyHandler);
@@ -86,44 +87,45 @@ class Notification extends BaseElement {
   }
 
   renderToast() {
-    const type = this.opt.type || (this.opt.id === 3 ? 'warning' : 'info');
+    const isChoice = this.options.mode === 'choice';
+    const type = this.options.type || (isChoice ? 'warning' : 'info');
     this.className = `ui-toast-card ui-toast-${type}`;
 
     const bodyDiv = document.createElement('div');
     bodyDiv.className = 'ui-toast-body';
-    if (this.opt.title) {
+    if (this.options.title) {
       const titleEl = document.createElement('div');
       titleEl.className = 'ui-toast-title';
-      titleEl.innerText = this.opt.title;
+      titleEl.innerText = this.options.title;
       bodyDiv.appendChild(titleEl);
     }
     bodyDiv.appendChild(this.content);
 
-    const hasButtons = this.opt.id === 3 || (this.opt.id === 2 && !this.opt.t) || (!this.opt.t && (this.opt.cbt || this.opt.cbf));
+    const hasButtons = isChoice || (this.options.mode === 'confirm' && !this.options.duration) || (!this.options.duration && (this.options.onConfirm || this.options.onCancel));
     if (hasButtons) {
       const actionsDiv = document.createElement('div');
       actionsDiv.className = 'ui-toast-actions';
-      if (this.opt.id === 3) actionsDiv.appendChild(this.cancel);
-      actionsDiv.appendChild(this.ok);
+      if (isChoice) actionsDiv.appendChild(this.cancelBtn);
+      actionsDiv.appendChild(this.okBtn);
       bodyDiv.appendChild(actionsDiv);
     }
 
     this.appendChild(bodyDiv);
     this.appendChild(this.closeBtn);
 
-    if (this.opt.t) {
-      const timeout = Number(this.opt.t) || 2000;
+    if (this.options.duration) {
+      const duration = Number(this.options.duration) || 2000;
       const progress = document.createElement('div');
       progress.className = 'ui-toast-progress';
-      progress.style.setProperty('--toast-duration', `${timeout}ms`);
-      progress.style.animationDuration = `${timeout}ms`;
+      progress.style.setProperty('--toast-duration', `${duration}ms`);
+      progress.style.animationDuration = `${duration}ms`;
       this.appendChild(progress);
-      this.timer = setTimeout(() => this.dismiss(), timeout);
+      this.timer = setTimeout(() => this.dismiss(), duration);
     }
 
     if (hasButtons) {
       setTimeout(() => {
-        (this.opt.id === 3 && this.opt.defaultFocus === 'cancel' ? this.cancel : this.ok).focus();
+        (isChoice && this.options.defaultFocus === 'cancel' ? this.cancelBtn : this.okBtn).focus();
       }, 10);
     }
   }
@@ -137,18 +139,32 @@ class Notification extends BaseElement {
   resolve(confirmed) {
     if (this._resolved) return;
     this._resolved = true;
-    if (confirmed && typeof this.opt.cbt === 'function') this.opt.cbt();
-    else if (!confirmed && typeof this.opt.cbf === 'function') this.opt.cbf();
+    if (confirmed && typeof this.options.onConfirm === 'function') this.options.onConfirm();
+    else if (!confirmed && typeof this.options.onCancel === 'function') this.options.onCancel();
     this.dismiss();
   }
 
-  static quick(txt, time = 2000, type = 'info', title = '') { return new Notification(txt, { id: 1, t: time, type, title }).show(); }
-  static info(txt, title = 'Info', time = 2500) { return new Notification(txt, { id: 1, t: time, type: 'info', title }).show(); }
-  static success(txt, title = 'Success', time = 2500) { return new Notification(txt, { id: 1, t: time, type: 'success', title }).show(); }
-  static warning(txt, title = 'Warning', time = 3500) { return new Notification(txt, { id: 1, t: time, type: 'warning', title }).show(); }
-  static error(txt, title = 'Error', time = 4500) { return new Notification(txt, { id: 1, t: time, type: 'error', title }).show(); }
-  static confirm(txt, cb) { return new Notification(txt, { id: 2, t: 3500, cbt: cb, type: 'info' }).show(); }
-  static choice(txt, cbt, cbf) { return new Notification(txt, { id: 3, cbt, cbf, type: 'warning', title: 'Confirm Action' }).show(); }
+  static quick(message, duration = 2000, type = 'info', title = '') {
+    return new Notification(message, { mode: 'toast', duration, type, title }).show();
+  }
+  static info(message, title = 'Info', duration = 2500) {
+    return new Notification(message, { mode: 'toast', duration, type: 'info', title }).show();
+  }
+  static success(message, title = 'Success', duration = 2500) {
+    return new Notification(message, { mode: 'toast', duration, type: 'success', title }).show();
+  }
+  static warning(message, title = 'Warning', duration = 3500) {
+    return new Notification(message, { mode: 'toast', duration, type: 'warning', title }).show();
+  }
+  static error(message, title = 'Error', duration = 4500) {
+    return new Notification(message, { mode: 'toast', duration, type: 'error', title }).show();
+  }
+  static confirm(message, onConfirm) {
+    return new Notification(message, { mode: 'confirm', duration: 3500, onConfirm, type: 'info' }).show();
+  }
+  static choice(message, onConfirm, onCancel) {
+    return new Notification(message, { mode: 'choice', onConfirm, onCancel, type: 'warning', title: 'Confirm Action' }).show();
+  }
 }
 
 if (typeof customElements !== 'undefined' && !customElements.get('ui-msg')) {
@@ -163,11 +179,11 @@ export async function triggerAppInstall() {
   if (!state.canInstall) {
     return Notification.warning('Desktop app installation requires a desktop Chromium browser (Chrome, Edge, or Brave).', 'Not Supported on This Browser', 5000);
   }
-  const res = await pwa.promptInstall();
-  if (res === 'accepted') {
+  const outcome = await pwa.promptInstall();
+  if (outcome === 'accepted') {
     return Notification.success('NanoCell Desktop App installed!', 'App Installed', 3500);
   }
-  if (res === 'manual') {
+  if (outcome === 'manual') {
     return Notification.info('To install NanoCell: click the Install icon in your browser address bar (or Browser Menu -> Save and share -> Install page as app).', 'Install Desktop App', 6000);
   }
   return null;

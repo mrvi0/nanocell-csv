@@ -1,4 +1,4 @@
-import { getSheet, getCsvHandle, Setting, stg, pwa, formatShortcut } from './state.js';
+import { getSheet, getCsvHandle, Setting, settings, pwa, formatShortcut } from './state.js';
 import { AboutDialog, SettingDialog, DialogManager } from './Dialogs.js';
 import { triggerAppInstall } from './Notification.js';
 import { dom, startCoordEdit } from './AppLayout.js';
@@ -34,12 +34,12 @@ function fuzzyScore(query, text) {
 class CommandPalette extends HTMLElement {
   static _defaultCommands = null;
 
-  static setDefaultCommands(commands) {
-    CommandPalette._defaultCommands = commands;
+  static setDefaultCommands(commandMap) {
+    CommandPalette._defaultCommands = commandMap;
     const existing = typeof document !== 'undefined'
       ? (document.getElementById('palette') || document.querySelector('ui-command-palette'))
       : null;
-    if (existing) existing.commands = commands;
+    if (existing) existing.commands = commandMap;
   }
 
   constructor() {
@@ -63,14 +63,14 @@ class CommandPalette extends HTMLElement {
     this.setAttribute('role', 'dialog');
     this.setAttribute('aria-modal', 'true');
     this.innerHTML = `
-      <div class="cmd_palette_backdrop palette-backdrop"></div>
-      <div class="cmd_palette_modal palette-container">
-        <div class="cmd_palette_header">
-          <input type="text" class="cmd_palette_input palette-input" placeholder="Type a command or search..." autofocus />
-          <span class="cmd_palette_close icon" role="button" title="Close (Esc)" aria-label="Close"></span>
+      <div class="cmd-palette-backdrop palette-backdrop"></div>
+      <div class="cmd-palette-modal palette-container">
+        <div class="cmd-palette-header">
+          <input type="text" class="cmd-palette-input palette-input" placeholder="Type a command or search..." autofocus />
+          <span class="cmd-palette-close icon" role="button" title="Close (Esc)" aria-label="Close"></span>
         </div>
-        <ul class="cmd_palette_list command-list" role="listbox"></ul>
-        <div class="cmd_palette_footer">
+        <ul class="cmd-palette-list command-list" role="listbox"></ul>
+        <div class="cmd-palette-footer">
           <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> Navigate</span>
           <span><kbd>&crarr;</kbd> Select</span>
           <span><kbd>Esc</kbd> Dismiss</span>
@@ -82,10 +82,10 @@ class CommandPalette extends HTMLElement {
     this.removeAttribute('open');
     this.style.display = 'none';
 
-    this.backdropEl = this.querySelector('.cmd_palette_backdrop');
+    this.backdropEl = this.querySelector('.cmd-palette-backdrop');
     this.inputEl = this.querySelector('input');
-    this.listEl = this.querySelector('.cmd_palette_list');
-    this.closeBtn = this.querySelector('.cmd_palette_close');
+    this.listEl = this.querySelector('.cmd-palette-list');
+    this.closeBtn = this.querySelector('.cmd-palette-close');
 
     this.backdropEl?.addEventListener('click', () => this.close());
     if (this.closeBtn) {
@@ -93,7 +93,7 @@ class CommandPalette extends HTMLElement {
       this.closeBtn.addEventListener('click', () => this.close());
     }
     this.inputEl?.addEventListener('input', () => this.filterCommands());
-    this.inputEl?.addEventListener('keydown', (e) => this.handleKeyDown(e));
+    this.inputEl?.addEventListener('keydown', (event) => this.handleKeyDown(event));
   }
 
   get isOpen() {
@@ -104,13 +104,13 @@ class CommandPalette extends HTMLElement {
     const canInstall = pwa.getState().canInstall;
     const commandMap = this.commands || CommandPalette._defaultCommands || {};
     return Object.entries(commandMap)
-      .filter(([id, c]) => c && typeof c.run === 'function' && (id !== 'installApp' || canInstall))
-      .map(([id, c]) => ({
+      .filter(([id, command]) => command && typeof command.run === 'function' && (id !== 'installApp' || canInstall))
+      .map(([id, command]) => ({
         id,
-        label: c.label || id,
-        description: c.description || c.label || id,
-        key: formatShortcut(c),
-        run: c.run
+        label: command.label || id,
+        description: command.description || command.label || id,
+        shortcut: formatShortcut(command),
+        run: command.run
       }));
   }
 
@@ -118,39 +118,39 @@ class CommandPalette extends HTMLElement {
     this.init();
     this.commands ||= CommandPalette._defaultCommands;
     const query = (this.inputEl?.value || '').trim();
-    const all = this.getCommands();
+    const allCommands = this.getCommands();
 
-    this.filteredCommands = !query ? all : all
-      .map(c => ({
-        cmd: c,
-        score: Math.max(fuzzyScore(query, c.description), fuzzyScore(query, c.label || '') * 0.95, fuzzyScore(query, c.id) * 0.9)
+    this.filteredCommands = !query ? allCommands : allCommands
+      .map(command => ({
+        command,
+        score: Math.max(fuzzyScore(query, command.description), fuzzyScore(query, command.label || '') * 0.95, fuzzyScore(query, command.id) * 0.9)
       }))
       .filter(item => item.score > 0)
       .sort((a, b) => b.score - a.score)
-      .map(item => item.cmd);
+      .map(item => item.command);
     this.selectedIndex = 0;
     this.renderList();
   }
 
-  setSelectedIndex(idx, scrollIntoView = true) {
-    if (idx < 0 || idx >= this.filteredCommands.length) return;
+  setSelectedIndex(index, scrollIntoView = true) {
+    if (index < 0 || index >= this.filteredCommands.length) return;
     if (this.listEl?.children.length > 0) {
-      const prev = this.listEl.children[this.selectedIndex];
-      if (prev) {
-        prev.classList.remove('selected');
-        prev.setAttribute('aria-selected', 'false');
+      const prevEl = this.listEl.children[this.selectedIndex];
+      if (prevEl) {
+        prevEl.classList.remove('selected');
+        prevEl.setAttribute('aria-selected', 'false');
       }
-      this.selectedIndex = idx;
-      const current = this.listEl.children[this.selectedIndex];
-      if (current) {
-        current.classList.add('selected');
-        current.setAttribute('aria-selected', 'true');
+      this.selectedIndex = index;
+      const currentEl = this.listEl.children[this.selectedIndex];
+      if (currentEl) {
+        currentEl.classList.add('selected');
+        currentEl.setAttribute('aria-selected', 'true');
         if (scrollIntoView) {
-          try { current.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch {}
+          try { currentEl.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch {}
         }
       }
     } else {
-      this.selectedIndex = idx;
+      this.selectedIndex = index;
     }
   }
 
@@ -160,49 +160,49 @@ class CommandPalette extends HTMLElement {
     this.listEl.innerHTML = '';
 
     if (this.filteredCommands.length === 0) {
-      this.listEl.innerHTML = '<li class="cmd_palette_empty">No matching commands</li>';
+      this.listEl.innerHTML = '<li class="cmd-palette-empty">No matching commands</li>';
       return;
     }
 
-    this.filteredCommands.forEach((cmdItem, idx) => {
+    this.filteredCommands.forEach((commandItem, index) => {
       const li = document.createElement('li');
-      const isSel = idx === this.selectedIndex;
-      li.className = `cmd_palette_item command-item ${isSel ? 'selected' : ''}`;
+      const isSelected = index === this.selectedIndex;
+      li.className = `cmd-palette-item command-item ${isSelected ? 'selected' : ''}`;
       li.setAttribute('role', 'option');
-      li.setAttribute('aria-selected', isSel ? 'true' : 'false');
-      li.setAttribute('data-index', idx);
+      li.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      li.setAttribute('data-index', index);
       li.innerHTML = `
-        <span class="cmd_palette_item_label">${escapeHtml(cmdItem.description)}</span>
-        ${cmdItem.key ? `<span class="cmd_palette_item_shortcut command-key">${escapeHtml(cmdItem.key)}</span>` : ''}
+        <span class="cmd-palette-item-label">${escapeHtml(commandItem.description)}</span>
+        ${commandItem.shortcut ? `<span class="cmd-palette-item-shortcut command-key">${escapeHtml(commandItem.shortcut)}</span>` : ''}
       `;
-      li.addEventListener('mouseenter', () => this.setSelectedIndex(idx, false));
-      li.addEventListener('click', () => this.executeIndex(idx));
+      li.addEventListener('mouseenter', () => this.setSelectedIndex(index, false));
+      li.addEventListener('click', () => this.executeIndex(index));
       this.listEl.appendChild(li);
     });
 
     try { this.listEl.children[this.selectedIndex]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch {}
   }
 
-  handleKeyDown(e) {
+  handleKeyDown(event) {
     this.init();
-    const len = this.filteredCommands.length;
-    if (e.key === 'ArrowDown' && len > 0) {
-      e.preventDefault();
-      this.setSelectedIndex((this.selectedIndex + 1) % len, true);
-    } else if (e.key === 'ArrowUp' && len > 0) {
-      e.preventDefault();
-      this.setSelectedIndex((this.selectedIndex - 1 + len) % len, true);
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
+    const length = this.filteredCommands.length;
+    if (event.key === 'ArrowDown' && length > 0) {
+      event.preventDefault();
+      this.setSelectedIndex((this.selectedIndex + 1) % length, true);
+    } else if (event.key === 'ArrowUp' && length > 0) {
+      event.preventDefault();
+      this.setSelectedIndex((this.selectedIndex - 1 + length) % length, true);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
       this.executeIndex(this.selectedIndex);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
       this.close();
     }
   }
 
-  executeIndex(idx) {
-    const item = this.filteredCommands[idx];
+  executeIndex(index) {
+    const item = this.filteredCommands[index];
     if (item && typeof item.run === 'function') {
       this.close();
       item.run();
@@ -233,7 +233,7 @@ class CommandPalette extends HTMLElement {
     else this.open();
   }
 
-  static toggle(commands = null) {
+  static toggle(commandMap = null) {
     let palette = typeof document !== 'undefined'
       ? (document.getElementById('palette') || document.querySelector('ui-command-palette'))
       : null;
@@ -243,8 +243,8 @@ class CommandPalette extends HTMLElement {
       document.body.appendChild(palette);
     }
     if (palette) {
-      const cmds = commands || CommandPalette._defaultCommands;
-      if (cmds) palette.commands = cmds;
+      const activeCommands = commandMap || CommandPalette._defaultCommands;
+      if (activeCommands) palette.commands = activeCommands;
       palette.toggle?.();
     }
     return palette;
@@ -255,20 +255,20 @@ class ContextMenu extends HTMLElement {
   constructor() {
     super();
     this.table = document.createElement('table');
-    this.firstBlock = document.createElement('div');
-    this.firstBlock.className = 'cmenu_header';
+    this.headerEl = document.createElement('div');
+    this.headerEl.className = 'cmenu-header';
     this.targetCol = null;
 
-    this.list = [
-      { key: 'fl', txt: 'Filter', opt: '', run: () => cmd.filter?.run(this.targetCol) },
-      { key: 'sa', txt: 'Sort', opt: 'A<br>Z', run: (e) => cmd.sort?.run(e) },
-      { key: 'sd', txt: 'Sort', opt: 'Z<br>A', run: (e) => cmd.sort_reverse?.run(e) },
-      { key: 'rn', txt: 'Round', opt: 'N', run: (e) => cmd.integer?.run(e) },
-      { key: 'rf', txt: 'Round', opt: '$', run: (e) => cmd.decimal?.run(e) },
-      { key: 'ic', txt: 'Insert', opt: '&verbar;', run: (e) => cmd.insertLeft?.run(e) },
-      { key: 'ir', txt: 'Insert', opt: '&horbar;', run: (e) => cmd.insertUp?.run(e) },
-      { key: 'dc', txt: 'Delete', opt: '&verbar;', run: (e) => cmd.deleteCol?.run(e) },
-      { key: 'dr', txt: 'Delete', opt: '&horbar;', run: (e) => cmd.deleteRow?.run(e) },
+    this.items = [
+      { id: 'filter', label: 'Filter', symbol: '', run: () => commands.filter?.run(this.targetCol) },
+      { id: 'sortAsc', label: 'Sort', symbol: 'A<br>Z', run: (event) => commands.sortAscending?.run(event) },
+      { id: 'sortDesc', label: 'Sort', symbol: 'Z<br>A', run: (event) => commands.sortDescending?.run(event) },
+      { id: 'roundInt', label: 'Round', symbol: 'N', run: (event) => commands.integer?.run(event) },
+      { id: 'roundDec', label: 'Round', symbol: '$', run: (event) => commands.decimal?.run(event) },
+      { id: 'insertCol', label: 'Insert', symbol: '&verbar;', run: (event) => commands.insertLeft?.run(event) },
+      { id: 'insertRow', label: 'Insert', symbol: '&horbar;', run: (event) => commands.insertUp?.run(event) },
+      { id: 'deleteCol', label: 'Delete', symbol: '&verbar;', run: (event) => commands.deleteCol?.run(event) },
+      { id: 'deleteRow', label: 'Delete', symbol: '&horbar;', run: (event) => commands.deleteRow?.run(event) },
     ];
 
     this.addEventListener('mouseout', (event) => {
@@ -286,17 +286,17 @@ class ContextMenu extends HTMLElement {
     if (this._menuInitialized) return;
     this._menuInitialized = true;
     this.table.innerHTML = '';
-    for (const item of this.list) {
+    for (const item of this.items) {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><div>${item.txt}</div></td>${item.opt ? `<td><div class="cmenu_opt">${item.opt}</div></td>` : ''}`;
-      tr.addEventListener('click', (ev) => {
+      tr.innerHTML = `<td><div>${item.label}</div></td>${item.symbol ? `<td><div class="cmenu-opt">${item.symbol}</div></td>` : ''}`;
+      tr.addEventListener('click', (event) => {
         this.hide();
-        item.run(ev);
+        item.run(event);
       });
       this.table.appendChild(tr);
     }
-    if (!this.firstBlock.parentNode) {
-      this.appendChild(this.firstBlock);
+    if (!this.headerEl.parentNode) {
+      this.appendChild(this.headerEl);
       this.appendChild(this.table);
     }
   }
@@ -306,54 +306,54 @@ class ContextMenu extends HTMLElement {
     this.ensureInitialized();
   }
 
-  showItems(showList) {
-    for (let i = 0; i < this.list.length; i++) {
-      const isVisible = showList.includes(this.list[i].key);
+  showItems(visibleIds) {
+    for (let i = 0; i < this.items.length; i++) {
+      const isVisible = visibleIds.includes(this.items[i].id);
       this.table.rows[i].classList.toggle('hidden', !isVisible);
       this.table.rows[i].style.display = isVisible ? 'table-row' : 'none';
     }
   }
 
-  pop(e) {
+  openAt(event) {
     this.ensureInitialized();
     const sheet = getSheet();
-    const targetCell = e.target.closest?.('td, th');
-    if (!sheet || !targetCell || !sheet.contains(targetCell) || (targetCell.tx < 0 && targetCell.ty < 0)) return;
+    const targetCell = event.target.closest?.('td, th');
+    if (!sheet || !targetCell || !sheet.contains(targetCell) || (targetCell.colOffset < 0 && targetCell.rowOffset < 0)) return;
 
-    this.x = targetCell.tx;
-    this.y = targetCell.ty;
+    this.colOffset = targetCell.colOffset;
+    this.rowOffset = targetCell.rowOffset;
 
     const menuWidth = 140, menuHeight = 220;
-    const x = (typeof window !== 'undefined' && e.clientX + menuWidth > window.innerWidth)
-      ? Math.max(0, e.clientX - menuWidth)
-      : e.clientX - 2;
-    const y = (typeof window !== 'undefined' && e.clientY + menuHeight > window.innerHeight)
-      ? Math.max(0, e.clientY - menuHeight)
-      : e.clientY - 2;
-    this.style.left = `${x}px`;
-    this.style.top = `${y}px`;
+    const left = (typeof window !== 'undefined' && event.clientX + menuWidth > window.innerWidth)
+      ? Math.max(0, event.clientX - menuWidth)
+      : event.clientX - 2;
+    const top = (typeof window !== 'undefined' && event.clientY + menuHeight > window.innerHeight)
+      ? Math.max(0, event.clientY - menuHeight)
+      : event.clientY - 2;
+    this.style.left = `${left}px`;
+    this.style.top = `${top}px`;
 
-    if (this.y < 0) {
-      this.targetCol = this.x + sheet.baseX;
-      sheet.slctCol(this.targetCol);
-      this.firstBlock.innerText = `col : ${targetCell.innerText}`;
-      this.showItems(['fl', 'sa', 'sd', 'rn', 'rf', 'ic', 'dc']);
-    } else if (this.x < 0) {
+    if (this.rowOffset < 0) {
+      this.targetCol = this.colOffset + sheet.baseX;
+      sheet.selectCol(this.targetCol);
+      this.headerEl.innerText = `col : ${targetCell.innerText}`;
+      this.showItems(['filter', 'sortAsc', 'sortDesc', 'roundInt', 'roundDec', 'insertCol', 'deleteCol']);
+    } else if (this.colOffset < 0) {
       this.targetCol = null;
-      sheet.slctRow(this.y + sheet.baseY);
-      this.firstBlock.innerText = `row : ${targetCell.innerText}`;
-      this.showItems(['rn', 'rf', 'ir', 'dr']);
-    } else if (targetCell.classList.contains('slct')) {
+      sheet.selectRow(this.rowOffset + sheet.baseY);
+      this.headerEl.innerText = `row : ${targetCell.innerText}`;
+      this.showItems(['roundInt', 'roundDec', 'insertRow', 'deleteRow']);
+    } else if (targetCell.classList.contains('selected')) {
       this.targetCol = null;
-      this.firstBlock.innerText = 'selection';
-      this.showItems(['rn', 'rf', 'dc', 'dr']);
+      this.headerEl.innerText = 'selection';
+      this.showItems(['roundInt', 'roundDec', 'deleteCol', 'deleteRow']);
     } else {
-      this.targetCol = targetCell.tx + sheet.baseX;
-      sheet.x = targetCell.tx + sheet.baseX;
-      sheet.y = targetCell.ty + sheet.baseY;
-      sheet.slctRefresh();
-      this.firstBlock.innerText = 'cell';
-      this.showItems(['rn', 'rf', 'ic', 'ir', 'dc', 'dr']);
+      this.targetCol = targetCell.colOffset + sheet.baseX;
+      sheet.x = targetCell.colOffset + sheet.baseX;
+      sheet.y = targetCell.rowOffset + sheet.baseY;
+      sheet.refreshSelection();
+      this.headerEl.innerText = 'cell';
+      this.showItems(['roundInt', 'roundDec', 'insertCol', 'insertRow', 'deleteCol', 'deleteRow']);
     }
 
     this.classList.add('open', 'visible');
@@ -367,55 +367,55 @@ if (typeof customElements !== 'undefined') {
   if (!customElements.get('ui-cmenu')) customElements.define('ui-cmenu', ContextMenu);
 }
 
-const cmd = {
-  about: { label: 'About', k: 'H', ctrl: true, run: () => AboutDialog.show(), description: 'About' },
+const commands = {
+  about: { label: 'About', key: 'H', ctrl: true, run: () => AboutDialog.show(), description: 'About' },
   installApp: { label: 'Install Desktop App', run: () => triggerAppInstall(), description: 'Install NanoCell as standalone desktop app' },
-  new: { label: 'New Sheet', k: 'N', ctrl: true, run: () => getCsvHandle()?.new(), description: 'New sheet' },
-  deleteRow: { label: 'Delete Row', k: 'BACKSPACE', ctrl: true, run: () => getSheet()?.deleteRows(), description: 'Delete Row' },
-  deleteCol: { label: 'Delete Col', k: 'BACKSPACE', ctrl: true, shift: true, run: () => getSheet()?.deleteCols(), description: 'Delete Col' },
-  delete: { label: 'Delete Selection', k: 'BACKSPACE', run: () => getSheet()?.deleteSelection(), description: 'Delete Selection' },
-  settings: { label: 'Settings', k: 'G', ctrl: true, run: () => SettingDialog.show(), description: 'Display Settings' },
-  shortcuts: { label: 'Command Palette', k: 'P', ctrl: true, run: () => CommandPalette.toggle(cmd), description: 'Command Palette' },
-  slctAll: { label: 'Select All', k: 'A', ctrl: true, run: () => getSheet()?.slctAll(), description: 'Select All' },
-  transpose: { label: 'Transpose', k: 'T', ctrl: true, shift: true, run: () => getSheet()?.rangeTranspose(), description: 'Transpose rows and columns (selection or whole sheet)' },
-  trim: { label: 'Trim Empty Rows/Cols', k: 'T', ctrl: true, alt: true, run: () => getSheet()?.trim(), description: 'Trim : remove all empty rows/cols' },
-  integer: { label: 'Round to Integer', k: 'I', ctrl: true, run: () => getSheet()?.round(true), description: 'Round selection to integer' },
-  decimal: { label: 'Round to Decimal', k: '$', ctrl: true, run: () => getSheet()?.round(false), description: 'Round selection to decimal' },
-  fixTop: { label: 'Freeze Header Row', k: 'B', ctrl: true, run: () => getSheet()?.toggleFixTop(), description: 'Freeze Header Row' },
-  undo: { label: 'Undo', k: 'Z', ctrl: true, run: () => getSheet()?.undo(), description: 'Undo' },
-  redo: { label: 'Redo', k: 'Z', ctrl: true, shift: true, run: () => getSheet()?.redo(), description: 'Redo' },
-  date: { label: "Insert Today's Date", k: ';', ctrl: true, run: () => getSheet()?.insertDate(), description: "Insert today's date" },
-  validate_dates: { label: 'Validate: Date Formats (YYYY-MM-DD)', run: () => ValidationPane.run('dates'), description: 'Standardize date formats across columns to YYYY-mm-dd' },
-  validate_whitespace: { label: 'Validate: Trim Whitespace', run: () => ValidationPane.run('trim_whitespace'), description: 'Remove leading and trailing whitespace from cell text' },
-  validate_comma_num: { label: 'Validate: Decimal Comma -> Dot', run: () => ValidationPane.run('comma_decimals'), description: 'Convert comma decimals (3,14) to dot notation in numeric fields' },
-  validate_line_returns: { label: 'Validate: Line Returns -> Pipe', run: () => ValidationPane.run('line_returns'), description: 'Replace embedded newline line breaks with pipe character (|)' },
-  validate_quotes: { label: 'Validate: Double Quotes -> Single', run: () => ValidationPane.run('double_quotes'), description: 'Replace double quotation marks (") with single quotes (\')' },
-  validate_comma_text: { label: 'Validate: Text Commas -> Dash', run: () => ValidationPane.run('text_commas'), description: 'Replace commas inside text cells with hyphens (-)' },
-  validate_lower: { label: 'Validate: Force Lowercase', run: () => ValidationPane.run('lowercase'), description: 'Convert all text cells to lowercase' },
-  filter: { label: 'Filter Column', k: 'Q', ctrl: true, run: (col) => getSheet()?.openFilter(col), description: 'Filter sheet rows by column value' },
-  find: { label: 'Find & Match', k: 'F', ctrl: true, run: () => getSheet()?.find(false), description: 'Quick find / match' },
-  findAdvanced: { label: 'Advanced Find / Replace', k: 'F', ctrl: true, shift: true, run: () => getSheet()?.find(true), description: 'Advanced find / replace (work in progress)' },
-  menubar: { label: 'Toggle Menu Bar', k: 'M', ctrl: true, run: () => Setting.toggleActionBar(), description: 'Toggle action bar display' },
-  open: { label: 'Open File', k: 'O', ctrl: true, run: () => getCsvHandle()?.open(), description: 'Open a CSV file from the file finder' },
-  save: { label: 'Save', k: 'S', ctrl: true, run: () => getCsvHandle()?.save(), description: 'Save' },
-  saveAs: { label: 'Save As', k: 'S', ctrl: true, shift: true, run: () => getCsvHandle()?.saveAs(), description: 'Save As' },
-  reloadFile: { label: 'Reload File', k: 'R', ctrl: true, run: () => getCsvHandle()?.reloadFile(), description: 'Reload file from last save' },
-  expand: { label: 'Expand Row', k: 'E', ctrl: true, run: () => getSheet()?.expand(), description: 'Expand first row to selection' },
-  validate_data: { label: 'Validate Data: Open Pane', k: 'P', ctrl: true, shift: true, run: () => ValidationPane.toggle(), description: 'Open data validation pane with all validation rules' },
-  validate_headers: { label: 'Validate: Headers & SQL Compliance', k: 'H', ctrl: true, shift: true, run: () => ValidationPane.run('headers'), description: 'Validate and sanitize column headers for SQL identifier standards and duplicates' },
-  next_occurance: { label: 'Next Occurrence', k: 'D', ctrl: true, run: () => getSheet()?.go_to_occurrence(true), description: 'Go to next occurence of cell value' },
-  prev_occurance: { label: 'Previous Occurrence', k: 'D', ctrl: true, shift: true, run: () => getSheet()?.go_to_occurrence(false), description: 'Go to previous occurence of cell value' },
+  new: { label: 'New Sheet', key: 'N', ctrl: true, run: () => getCsvHandle()?.new(), description: 'New sheet' },
+  deleteRow: { label: 'Delete Row', key: 'BACKSPACE', ctrl: true, run: () => getSheet()?.deleteRows(), description: 'Delete Row' },
+  deleteCol: { label: 'Delete Col', key: 'BACKSPACE', ctrl: true, shift: true, run: () => getSheet()?.deleteCols(), description: 'Delete Col' },
+  delete: { label: 'Delete Selection', key: 'BACKSPACE', run: () => getSheet()?.deleteSelection(), description: 'Delete Selection' },
+  settings: { label: 'Settings', key: 'G', ctrl: true, run: () => SettingDialog.show(), description: 'Display Settings' },
+  shortcuts: { label: 'Command Palette', key: 'P', ctrl: true, run: () => CommandPalette.toggle(commands), description: 'Command Palette' },
+  selectAll: { label: 'Select All', key: 'A', ctrl: true, run: () => getSheet()?.selectAll(), description: 'Select All' },
+  transpose: { label: 'Transpose', key: 'T', ctrl: true, shift: true, run: () => getSheet()?.transposeSelection(), description: 'Transpose rows and columns (selection or whole sheet)' },
+  trim: { label: 'Trim Empty Rows/Cols', key: 'T', ctrl: true, alt: true, run: () => getSheet()?.trim(), description: 'Trim : remove all empty rows/cols' },
+  integer: { label: 'Round to Integer', key: 'I', ctrl: true, run: () => getSheet()?.round(true), description: 'Round selection to integer' },
+  decimal: { label: 'Round to Decimal', key: '$', ctrl: true, run: () => getSheet()?.round(false), description: 'Round selection to decimal' },
+  fixTop: { label: 'Freeze Header Row', icon: 'fix_top', key: 'B', ctrl: true, run: () => getSheet()?.toggleFixTop(), description: 'Freeze Header Row' },
+  undo: { label: 'Undo', key: 'Z', ctrl: true, run: () => getSheet()?.undo(), description: 'Undo' },
+  redo: { label: 'Redo', key: 'Z', ctrl: true, shift: true, run: () => getSheet()?.redo(), description: 'Redo' },
+  date: { label: "Insert Today's Date", key: ';', ctrl: true, run: () => getSheet()?.insertDate(), description: "Insert today's date" },
+  validateDates: { label: 'Validate: Date Formats (YYYY-MM-DD)', run: () => ValidationPane.run('dates'), description: 'Standardize date formats across columns to YYYY-mm-dd' },
+  validateWhitespace: { label: 'Validate: Trim Whitespace', run: () => ValidationPane.run('trim_whitespace'), description: 'Remove leading and trailing whitespace from cell text' },
+  validateCommaDecimals: { label: 'Validate: Decimal Comma -> Dot', run: () => ValidationPane.run('comma_decimals'), description: 'Convert comma decimals (3,14) to dot notation in numeric fields' },
+  validateLineReturns: { label: 'Validate: Line Returns -> Pipe', run: () => ValidationPane.run('line_returns'), description: 'Replace embedded newline line breaks with pipe character (|)' },
+  validateQuotes: { label: 'Validate: Double Quotes -> Single', run: () => ValidationPane.run('double_quotes'), description: 'Replace double quotation marks (") with single quotes (\')' },
+  validateTextCommas: { label: 'Validate: Text Commas -> Dash', run: () => ValidationPane.run('text_commas'), description: 'Replace commas inside text cells with hyphens (-)' },
+  validateLowercase: { label: 'Validate: Force Lowercase', run: () => ValidationPane.run('lowercase'), description: 'Convert all text cells to lowercase' },
+  filter: { label: 'Filter Column', key: 'Q', ctrl: true, run: (col) => getSheet()?.openFilter(col), description: 'Filter sheet rows by column value' },
+  find: { label: 'Find & Match', key: 'F', ctrl: true, run: () => getSheet()?.find(false), description: 'Quick find / match' },
+  findAdvanced: { label: 'Advanced Find / Replace', key: 'F', ctrl: true, shift: true, run: () => getSheet()?.find(true), description: 'Advanced find / replace' },
+  toggleActionBar: { label: 'Toggle Menu Bar', key: 'M', ctrl: true, run: () => Setting.toggleActionBar(), description: 'Toggle action bar display' },
+  open: { label: 'Open File', key: 'O', ctrl: true, run: () => getCsvHandle()?.open(), description: 'Open a CSV file from the file finder' },
+  save: { label: 'Save', key: 'S', ctrl: true, run: () => getCsvHandle()?.save(), description: 'Save' },
+  saveAs: { label: 'Save As', key: 'S', ctrl: true, shift: true, run: () => getCsvHandle()?.saveAs(), description: 'Save As' },
+  reloadFile: { label: 'Reload File', icon: 'reload_file', key: 'R', ctrl: true, run: () => getCsvHandle()?.reloadFile(), description: 'Reload file from last save' },
+  expand: { label: 'Expand Row', key: 'E', ctrl: true, run: () => getSheet()?.expand(), description: 'Expand first row to selection' },
+  validateData: { label: 'Validate Data: Open Pane', icon: 'validate_data', key: 'P', ctrl: true, shift: true, run: () => ValidationPane.toggle(), description: 'Open data validation pane with all validation rules' },
+  validateHeaders: { label: 'Validate: Headers & SQL Compliance', key: 'H', ctrl: true, shift: true, run: () => ValidationPane.run('headers'), description: 'Validate and sanitize column headers for SQL identifier standards and duplicates' },
+  nextOccurrence: { label: 'Next Occurrence', key: 'D', ctrl: true, run: () => getSheet()?.goToOccurrence(true), description: 'Go to next occurrence of cell value' },
+  prevOccurrence: { label: 'Previous Occurrence', key: 'D', ctrl: true, shift: true, run: () => getSheet()?.goToOccurrence(false), description: 'Go to previous occurrence of cell value' },
   goToCoordinate: { label: 'Go to Coordinate', run: () => startCoordEdit(), description: 'Go to coordinate' },
-  sort: { label: 'Sort Ascending', k: 'L', ctrl: true, run: () => { const s = getSheet(); s?.sort(s.x, true); }, description: 'Sort rows based on active column (ascending order)' },
-  sort_reverse: { label: 'Sort Descending', k: 'L', ctrl: true, shift: true, run: () => { const s = getSheet(); s?.sort(s.x, false); }, description: 'Sort rows based on active column (descending order)' },
-  shiftUp: { label: 'Shift Row Up', k: 'ARROWUP', alt: true, run: () => getSheet()?.shift(0), description: 'Shift row up' },
-  shiftDown: { label: 'Shift Row Down', k: 'ARROWDOWN', alt: true, run: () => getSheet()?.shift(2), description: 'Shift row down' },
-  shiftRight: { label: 'Shift Col Right', k: 'ARROWRIGHT', alt: true, run: () => getSheet()?.shift(1), description: 'Shift col right' },
-  shiftLeft: { label: 'Shift Col Left', k: 'ARROWLEFT', alt: true, run: () => getSheet()?.shift(3), description: 'Shift col left' },
-  insertUp: { label: 'Insert Row Above', k: 'ARROWUP', shift: true, alt: true, run: () => getSheet()?.insert(0), description: 'Insert row above' },
-  insertDown: { label: 'Insert Row Below', k: 'ARROWDOWN', shift: true, alt: true, run: () => getSheet()?.insert(2), description: 'Insert row below' },
-  insertRight: { label: 'Insert Col Right', k: 'ARROWRIGHT', shift: true, alt: true, run: () => getSheet()?.insert(1), description: 'Insert col right' },
-  insertLeft: { label: 'Insert Col Left', k: 'ARROWLEFT', shift: true, alt: true, run: () => getSheet()?.insert(3), description: 'Insert col left' },
+  sortAscending: { label: 'Sort Ascending', icon: 'sort', key: 'L', ctrl: true, run: () => { const s = getSheet(); s?.sort(s.x, true); }, description: 'Sort rows based on active column (ascending order)' },
+  sortDescending: { label: 'Sort Descending', icon: 'sort_reverse', key: 'L', ctrl: true, shift: true, run: () => { const s = getSheet(); s?.sort(s.x, false); }, description: 'Sort rows based on active column (descending order)' },
+  shiftUp: { label: 'Shift Row Up', key: 'ARROWUP', alt: true, run: () => getSheet()?.shift(0), description: 'Shift row up' },
+  shiftDown: { label: 'Shift Row Down', key: 'ARROWDOWN', alt: true, run: () => getSheet()?.shift(2), description: 'Shift row down' },
+  shiftRight: { label: 'Shift Col Right', key: 'ARROWRIGHT', alt: true, run: () => getSheet()?.shift(1), description: 'Shift col right' },
+  shiftLeft: { label: 'Shift Col Left', key: 'ARROWLEFT', alt: true, run: () => getSheet()?.shift(3), description: 'Shift col left' },
+  insertUp: { label: 'Insert Row Above', key: 'ARROWUP', shift: true, alt: true, run: () => getSheet()?.insert(0), description: 'Insert row above' },
+  insertDown: { label: 'Insert Row Below', key: 'ARROWDOWN', shift: true, alt: true, run: () => getSheet()?.insert(2), description: 'Insert row below' },
+  insertRight: { label: 'Insert Col Right', key: 'ARROWRIGHT', shift: true, alt: true, run: () => getSheet()?.insert(1), description: 'Insert col right' },
+  insertLeft: { label: 'Insert Col Left', key: 'ARROWLEFT', shift: true, alt: true, run: () => getSheet()?.insert(3), description: 'Insert col left' },
   exportJson: { label: 'Export as JSON', run: () => getCsvHandle()?.exportJson(), description: 'Export current sheet as JSON file' },
   exportTsv: { label: 'Export as TSV', run: () => getCsvHandle()?.exportTsv(), description: 'Export current sheet as Tab-Separated Values (TSV) file' },
   exportMarkdown: { label: 'Export as Markdown', run: () => getCsvHandle()?.exportMarkdown(), description: 'Export current sheet as GitHub Flavored Markdown table' },
@@ -423,7 +423,7 @@ const cmd = {
   copyJson: { label: 'Copy as JSON', run: () => getCsvHandle()?.copyJson(), description: 'Copy active selection as JSON to clipboard' },
 };
 
-CommandPalette.setDefaultCommands(cmd);
+CommandPalette.setDefaultCommands(commands);
 
 let activeKeyDownHandler = null;
 let activeKeyUpHandler = null;
@@ -439,21 +439,21 @@ function getShortcutKey(key, ctrl, shift, alt) {
 function getShortcutMap() {
   if (!shortcutMap) {
     shortcutMap = new Map();
-    for (const c of Object.values(cmd)) {
-      if (!c.k || typeof c.run !== 'function') continue;
-      const keyUpper = String(c.k).toUpperCase();
-      const ctrl = Boolean(c.ctrl), shift = Boolean(c.shift), alt = Boolean(c.alt);
-      shortcutMap.set(getShortcutKey(keyUpper, ctrl, shift, alt), c);
-      if (c.k !== keyUpper) shortcutMap.set(getShortcutKey(c.k, ctrl, shift, alt), c);
+    for (const command of Object.values(commands)) {
+      if (!command.key || typeof command.run !== 'function') continue;
+      const keyUpper = String(command.key).toUpperCase();
+      const ctrl = Boolean(command.ctrl), shift = Boolean(command.shift), alt = Boolean(command.alt);
+      shortcutMap.set(getShortcutKey(keyUpper, ctrl, shift, alt), command);
+      if (command.key !== keyUpper) shortcutMap.set(getShortcutKey(command.key, ctrl, shift, alt), command);
     }
-    if (cmd.delete) shortcutMap.set(getShortcutKey('DELETE', false, false, false), cmd.delete);
-    if (cmd.redo) shortcutMap.set(getShortcutKey('Y', true, false, false), cmd.redo);
-    if (cmd.shortcuts) shortcutMap.set(getShortcutKey('K', true, false, false), cmd.shortcuts);
+    if (commands.delete) shortcutMap.set(getShortcutKey('DELETE', false, false, false), commands.delete);
+    if (commands.redo) shortcutMap.set(getShortcutKey('Y', true, false, false), commands.redo);
+    if (commands.shortcuts) shortcutMap.set(getShortcutKey('K', true, false, false), commands.shortcuts);
   }
   return shortcutMap;
 }
 
-const PREVENT_DFLT_KEYS = new Set([
+const PREVENT_DEFAULT_KEYS = new Set([
   'H', 'N', 'T', 'F', 'O', 'P', 'M', 'S', 'R', 'G', 'K',
   'A', 'B', 'D', 'E', 'L', 'Z', 'Y', 'Q', ';', 'BACKSPACE'
 ]);
@@ -471,15 +471,15 @@ export function buildKeys() {
     if (activePasteHandler) document.removeEventListener('paste', activePasteHandler);
   }
 
-  activeKeyDownHandler = (e) => {
-    let k = e.key.toUpperCase();
-    const ctrlDown = e.metaKey || e.ctrlKey;
-    const alt = e.altKey;
-    const shift = e.shiftKey;
+  activeKeyDownHandler = (event) => {
+    let key = event.key.toUpperCase();
+    const ctrlDown = event.metaKey || event.ctrlKey;
+    const alt = event.altKey;
+    const shift = event.shiftKey;
     const activeSheet = getSheet();
 
     const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
-    const isCellInput = Boolean(activeSheet?.inputing && activeEl === activeSheet.inputField);
+    const isCellInput = Boolean(activeSheet?.isEditing && activeEl === activeSheet.inputField);
     const inCommandPalette = Boolean(
       activeEl?.closest?.('ui-command-palette') ||
       dom?.palette?.isOpen ||
@@ -492,44 +492,44 @@ export function buildKeys() {
     const inValidationPane = Boolean(validationPane?.isOpen);
     const isOtherInput = isInputElement(activeEl) && !isCellInput;
 
-    if (ctrlDown && (PREVENT_DFLT_KEYS.has(k) || PREVENT_DFLT_KEYS.has(e.key))) {
-      if (!(isOtherInput || isCellInput) || (k !== 'C' && k !== 'V' && k !== 'X' && k !== 'A' && k !== 'Z')) {
-        e.preventDefault();
+    if (ctrlDown && (PREVENT_DEFAULT_KEYS.has(key) || PREVENT_DEFAULT_KEYS.has(event.key))) {
+      if (!(isOtherInput || isCellInput) || (key !== 'C' && key !== 'V' && key !== 'X' && key !== 'A' && key !== 'Z')) {
+        event.preventDefault();
       }
     }
 
     if (inCommandPalette) {
-      if (k === 'ESCAPE') {
+      if (key === 'ESCAPE') {
         (document.getElementById('palette') || document.querySelector('ui-command-palette'))?.close?.();
       }
       return;
     }
 
-    if (ctrlDown && (k === 'P' || k === 'K') && !shift && !alt) {
-      e.preventDefault();
-      if (cmd.shortcuts?.run) cmd.shortcuts.run();
+    if (ctrlDown && (key === 'P' || key === 'K') && !shift && !alt) {
+      event.preventDefault();
+      if (commands.shortcuts?.run) commands.shortcuts.run();
       else (document.getElementById('palette') || document.querySelector('ui-command-palette'))?.toggle?.();
       return;
     }
 
     if (inDialog) {
-      if (k === 'ESCAPE') { e.preventDefault(); DialogManager.close(); }
+      if (key === 'ESCAPE') { event.preventDefault(); DialogManager.close(); }
       return;
     }
 
     if (inFinder) {
-      if (k === 'ESCAPE') { e.preventDefault(); activeEl.closest('ui-finder')?.close?.(); }
-      else if (ctrlDown && k === 'F') { e.preventDefault(); activeSheet?.find(shift); }
+      if (key === 'ESCAPE') { event.preventDefault(); activeEl.closest('ui-finder')?.close?.(); }
+      else if (ctrlDown && key === 'F') { event.preventDefault(); activeSheet?.find(shift); }
       return;
     }
 
     if (inFilter) {
-      if (k === 'ESCAPE' || (ctrlDown && k === 'Q')) { e.preventDefault(); activeEl.closest('ui-filter')?.close?.(); }
+      if (key === 'ESCAPE' || (ctrlDown && key === 'Q')) { event.preventDefault(); activeEl.closest('ui-filter')?.close?.(); }
       return;
     }
 
-    if (inValidationPane && k === 'ESCAPE' && !isCellInput) {
-      e.preventDefault();
+    if (inValidationPane && key === 'ESCAPE' && !isCellInput) {
+      event.preventDefault();
       validationPane.handleBack?.();
       return;
     }
@@ -537,101 +537,101 @@ export function buildKeys() {
     if (isOtherInput) return;
 
     if (isCellInput) {
-      if (ctrlDown && (k === 'S' || k === 'O' || k === 'Q')) {
-        e.preventDefault();
-        if (k === 'S') (shift ? cmd.saveAs : cmd.save).run();
-        else if (k === 'O') cmd.open.run();
-        else if (k === 'Q') cmd.filter.run();
+      if (ctrlDown && (key === 'S' || key === 'O' || key === 'Q')) {
+        event.preventDefault();
+        if (key === 'S') (shift ? commands.saveAs : commands.save).run();
+        else if (key === 'O') commands.open.run();
+        else if (key === 'Q') commands.filter.run();
       }
       return;
     }
 
-    const isBoundaryKey = k === 'ARROWUP' || k === 'ARROWDOWN' || k === 'ARROWLEFT' || k === 'ARROWRIGHT' ||
-                          k === 'HOME' || k === 'END' || k === 'PAGEUP' || k === 'PAGEDOWN';
+    const isBoundaryKey = key === 'ARROWUP' || key === 'ARROWDOWN' || key === 'ARROWLEFT' || key === 'ARROWRIGHT' ||
+                          key === 'HOME' || key === 'END' || key === 'PAGEUP' || key === 'PAGEDOWN';
     if (activeSheet) {
-      activeSheet.slctRange = shift && !alt && !e.metaKey && isBoundaryKey;
+      activeSheet.isSelectingRange = shift && !alt && !event.metaKey && isBoundaryKey;
     }
 
-    if ((alt && k === 'TAB') || (ctrlDown && (k === 'C' || k === 'V'))) return;
-    if (k === 'TAB') e.preventDefault();
-    if (e.code === 'Space') k = 'SPACE';
+    if ((alt && key === 'TAB') || (ctrlDown && (key === 'C' || key === 'V'))) return;
+    if (key === 'TAB') event.preventDefault();
+    if (event.code === 'Space') key = 'SPACE';
 
     if (activeSheet) {
-      const pageSize = stg?.rows || 10;
+      const pageSize = settings?.rows || 10;
       const maxX = Math.max(0, activeSheet.df.width - 1);
       const maxY = Math.max(0, activeSheet.rowCount - 1);
 
-      if (k === 'PAGEUP') {
-        e.preventDefault();
+      if (key === 'PAGEUP') {
+        event.preventDefault();
         activeSheet.y = Math.max(0, activeSheet.y - pageSize);
-        return activeSheet.slctRefresh();
+        return activeSheet.refreshSelection();
       }
-      if (k === 'PAGEDOWN') {
-        e.preventDefault();
+      if (key === 'PAGEDOWN') {
+        event.preventDefault();
         activeSheet.y = Math.min(maxY, activeSheet.y + pageSize);
-        return activeSheet.slctRefresh();
+        return activeSheet.refreshSelection();
       }
-      if (k === 'HOME') {
-        e.preventDefault();
+      if (key === 'HOME') {
+        event.preventDefault();
         activeSheet.x = 0;
         if (ctrlDown) activeSheet.y = 0;
-        return activeSheet.slctRefresh();
+        return activeSheet.refreshSelection();
       }
-      if (k === 'END' && ctrlDown) {
-        e.preventDefault();
+      if (key === 'END' && ctrlDown) {
+        event.preventDefault();
         activeSheet.x = maxX;
         activeSheet.y = maxY;
-        return activeSheet.slctRefresh();
+        return activeSheet.refreshSelection();
       }
-      if (k === 'F2') {
-        e.preventDefault();
-        if (!activeSheet.df?.lock) activeSheet.input();
+      if (key === 'F2') {
+        event.preventDefault();
+        if (!activeSheet.df?.lock) activeSheet.startEdit();
         return;
       }
       if (ctrlDown) {
-        if (k === 'ARROWUP') { e.preventDefault(); activeSheet.y = 0; return activeSheet.slctRefresh(); }
-        if (k === 'ARROWRIGHT') { e.preventDefault(); activeSheet.x = maxX; return activeSheet.slctRefresh(); }
-        if (k === 'ARROWDOWN') { e.preventDefault(); activeSheet.y = maxY; return activeSheet.slctRefresh(); }
-        if (k === 'ARROWLEFT') { e.preventDefault(); activeSheet.x = 0; return activeSheet.slctRefresh(); }
+        if (key === 'ARROWUP') { event.preventDefault(); activeSheet.y = 0; return activeSheet.refreshSelection(); }
+        if (key === 'ARROWRIGHT') { event.preventDefault(); activeSheet.x = maxX; return activeSheet.refreshSelection(); }
+        if (key === 'ARROWDOWN') { event.preventDefault(); activeSheet.y = maxY; return activeSheet.refreshSelection(); }
+        if (key === 'ARROWLEFT') { event.preventDefault(); activeSheet.x = 0; return activeSheet.refreshSelection(); }
       }
     }
 
     const map = getShortcutMap();
-    const matchedCmd = map.get(getShortcutKey(k, ctrlDown, shift, alt)) ||
-                       map.get(getShortcutKey(e.key, ctrlDown, shift, alt));
+    const matchedCmd = map.get(getShortcutKey(key, ctrlDown, shift, alt)) ||
+                       map.get(getShortcutKey(event.key, ctrlDown, shift, alt));
     if (matchedCmd) {
       matchedCmd.run();
-      return e.preventDefault();
+      return event.preventDefault();
     }
 
-    if (e.key.length === 1 && !ctrlDown && !e.metaKey && !alt && activeSheet) {
+    if (event.key.length === 1 && !ctrlDown && !event.metaKey && !alt && activeSheet) {
       if (activeSheet.df?.lock) return;
-      e.preventDefault();
-      return activeSheet.input(e.key);
+      event.preventDefault();
+      return activeSheet.startEdit(event.key);
     }
 
     if (activeSheet) {
-      switch (k) {
-        case 'ARROWUP': e.preventDefault(); activeSheet.y--; activeSheet.slctRefresh(); return;
-        case 'ARROWDOWN': e.preventDefault(); activeSheet.y++; activeSheet.slctRefresh(); return;
-        case 'ARROWLEFT': e.preventDefault(); activeSheet.x--; activeSheet.slctRefresh(); return;
-        case 'ARROWRIGHT': e.preventDefault(); activeSheet.x++; activeSheet.slctRefresh(); return;
+      switch (key) {
+        case 'ARROWUP': event.preventDefault(); activeSheet.y--; activeSheet.refreshSelection(); return;
+        case 'ARROWDOWN': event.preventDefault(); activeSheet.y++; activeSheet.refreshSelection(); return;
+        case 'ARROWLEFT': event.preventDefault(); activeSheet.x--; activeSheet.refreshSelection(); return;
+        case 'ARROWRIGHT': event.preventDefault(); activeSheet.x++; activeSheet.refreshSelection(); return;
         case 'TAB':
-          e.preventDefault();
-          activeSheet.slctRange = false;
+          event.preventDefault();
+          activeSheet.isSelectingRange = false;
           activeSheet.rangeEnd = undefined;
           activeSheet.x += shift ? -1 : 1;
-          activeSheet.slctRefresh();
+          activeSheet.refreshSelection();
           return;
         case 'ENTER':
-          e.preventDefault();
-          if (!activeSheet.df?.lock) activeSheet.input();
+          event.preventDefault();
+          if (!activeSheet.df?.lock) activeSheet.startEdit();
           return;
         case 'BACKSPACE':
         case 'DELETE':
-          e.preventDefault();
+          event.preventDefault();
           if (!activeSheet.df?.lock) {
-            activeSheet.rangeEdit('');
+            activeSheet.editSelection('');
             activeSheet.refresh();
           }
           return;
@@ -639,40 +639,40 @@ export function buildKeys() {
     }
   };
 
-  activeKeyUpHandler = (e) => {
-    const k = e.key.toUpperCase();
+  activeKeyUpHandler = (event) => {
+    const key = event.key.toUpperCase();
     const activeSheet = getSheet();
-    if (activeSheet && (k === 'CONTROL' || k === 'SHIFT') && !e.shiftKey) {
-      activeSheet.slctRange = false;
+    if (activeSheet && (key === 'CONTROL' || key === 'SHIFT') && !event.shiftKey) {
+      activeSheet.isSelectingRange = false;
     }
   };
 
   const getClipboardSheet = (requireUnlocked = false) => {
     if (isInputElement(document.activeElement)) return null;
-    const s = getSheet();
-    return (!s || (requireUnlocked && s.df?.lock)) ? null : s;
+    const sheet = getSheet();
+    return (!sheet || (requireUnlocked && sheet.df?.lock)) ? null : sheet;
   };
 
-  activeCopyHandler = (e) => {
-    const s = getClipboardSheet(false);
-    if (!s) return;
-    e.preventDefault();
-    e.clipboardData?.setData('text/plain', s.copySelection());
+  activeCopyHandler = (event) => {
+    const sheet = getClipboardSheet(false);
+    if (!sheet) return;
+    event.preventDefault();
+    event.clipboardData?.setData('text/plain', sheet.copySelection());
   };
 
-  activeCutHandler = (e) => {
-    const s = getClipboardSheet(true);
-    if (!s) return;
-    e.preventDefault();
-    e.clipboardData?.setData('text/plain', s.cutSelection());
+  activeCutHandler = (event) => {
+    const sheet = getClipboardSheet(true);
+    if (!sheet) return;
+    event.preventDefault();
+    event.clipboardData?.setData('text/plain', sheet.cutSelection());
   };
 
-  activePasteHandler = (e) => {
-    const s = getClipboardSheet(true);
-    if (!s) return;
-    e.preventDefault();
-    const rawText = e.clipboardData?.getData('text');
-    if (rawText) s.pasteText(rawText);
+  activePasteHandler = (event) => {
+    const sheet = getClipboardSheet(true);
+    if (!sheet) return;
+    event.preventDefault();
+    const rawText = event.clipboardData?.getData('text');
+    if (rawText) sheet.pasteText(rawText);
   };
 
   document.addEventListener('keydown', activeKeyDownHandler);
@@ -682,4 +682,4 @@ export function buildKeys() {
   document.addEventListener('paste', activePasteHandler);
 }
 
-export { cmd, formatShortcut, CommandPalette, ContextMenu };
+export { commands, formatShortcut, CommandPalette, ContextMenu };

@@ -1,8 +1,7 @@
 /**
  * @file app/js/state.js
- * Unified application runtime context, persistent settings store (Setting / stg),
+ * Unified application runtime context, persistent settings store (Setting / settings),
  * environment detection, and PWA install state manager.
- * Zero DOM component dependencies, zero circular imports.
  */
 
 let activeSheet = null;
@@ -17,56 +16,60 @@ export function resetContext() { activeSheet = null; activeCsvHandle = null; }
 
 // --- Persistent Settings Store ---
 
-const stg = {};
-if (typeof globalThis !== 'undefined') globalThis.stg = stg;
+const settings = {};
+if (typeof globalThis !== 'undefined') globalThis.settings = settings;
 
 export class Setting {
-  constructor(s) {
+  constructor(definition) {
     let stored = null;
     try {
-      stored = (typeof window !== 'undefined' && typeof localStorage !== 'undefined') ? localStorage.getItem(s.key) : null;
+      stored = (typeof window !== 'undefined' && typeof localStorage !== 'undefined')
+        ? localStorage.getItem(definition.key)
+        : null;
     } catch {}
 
     if (stored !== null && stored !== '' && !isNaN(stored)) stored = Number(stored);
     if (stored === 'true') stored = true;
     if (stored === 'false') stored = false;
-    if (s.key === 'editMaxFileSize' && (stored === 100 || stored === '100')) {
-      stored = s.dflt;
-      try { localStorage?.setItem('editMaxFileSize', String(s.dflt)); } catch {}
+    if (definition.key === 'editMaxFileSize' && (stored === 100 || stored === '100')) {
+      stored = definition.defaultValue;
+      try { localStorage?.setItem('editMaxFileSize', String(definition.defaultValue)); } catch {}
     }
 
-    this.key = s.key;
+    this.key = definition.key;
     if (stored !== null) {
       this.value = stored;
-    } else if (s.key === 'theme') {
+    } else if (definition.key === 'theme') {
       const prefersDark = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches;
       this.value = prefersDark ? 'nord' : 'light';
     } else {
-      this.value = s.dflt;
+      this.value = definition.defaultValue;
     }
-    this.cb = s.cb;
+    this.onChange = definition.onChange;
 
-    Object.defineProperty(stg, this.key, {
+    Object.defineProperty(settings, this.key, {
       get: () => this.value,
-      set: (val) => {
-        this.value = val;
-        try { localStorage?.setItem(this.key, val); } catch {}
-        this.cb?.(this.value);
+      set: (value) => {
+        this.value = value;
+        try { localStorage?.setItem(this.key, value); } catch {}
+        this.onChange?.(this.value);
       },
       configurable: true
     });
   }
 
-  static set(key, val) { stg[key] = val; }
-  static toggleActionBar() { stg.actionBar = stg.actionBar === false; }
+  static set(key, value) { settings[key] = value; }
+  static toggleActionBar() { settings.actionBar = settings.actionBar === false; }
 
   static init() {
-    for (const s of Setting.list) if (!s.title) new Setting(s);
+    for (const def of Setting.list) {
+      if (!def.title) new Setting(def);
+    }
     Setting.setTheme();
   }
 
   static setTheme(themeName) {
-    const activeTheme = themeName || globalThis.stg?.theme || 'light';
+    const activeTheme = themeName || settings.theme || 'light';
     if (typeof document !== 'undefined') {
       document.documentElement?.setAttribute('data-theme', activeTheme);
       document.body?.setAttribute('data-theme', activeTheme);
@@ -74,62 +77,66 @@ export class Setting {
   }
 
   static runAll() {
-    for (const s of Setting.list) if (s.key && typeof s.cb === 'function') s.cb(stg[s.key]);
+    for (const def of Setting.list) {
+      if (def.key && typeof def.onChange === 'function') def.onChange(settings[def.key]);
+    }
   }
 
   static resetDefault() {
-    for (const s of Setting.list) if (s.key) stg[s.key] = s.dflt;
+    for (const def of Setting.list) {
+      if (def.key) settings[def.key] = def.defaultValue;
+    }
   }
 }
 
 Setting.list = [
   { title: 'Appearance' },
-  { key: 'theme', dflt: 'nord', name: 'Theme', list: ['light', 'slate', 'dark', 'solarized', 'night', 'nord', 'dracula'], hide: true, cb: Setting.setTheme },
-  { key: 'font', dflt: 13, name: 'Font Size', min: 7, max: 24, cb: n => {
-    const b = typeof document !== 'undefined' ? document.body : null;
-    if (b) {
-      b.style.setProperty('--app-font-size', `${n}px`);
-      b.style.fontSize = `${n}px`;
+  { key: 'theme', defaultValue: 'nord', name: 'Theme', list: ['light', 'slate', 'dark', 'solarized', 'night', 'nord', 'dracula'], hide: true, onChange: Setting.setTheme },
+  { key: 'font', defaultValue: 13, name: 'Font Size', min: 7, max: 24, onChange: (fontSize) => {
+    const body = typeof document !== 'undefined' ? document.body : null;
+    if (body) {
+      body.style.setProperty('--app-font-size', `${fontSize}px`);
+      body.style.fontSize = `${fontSize}px`;
     }
   } },
-  { key: 'rows', dflt: 25, name: 'Rows', min: 10, max: 60, cb: () => getSheet()?.reload?.() },
-  { key: 'cols', dflt: 7, name: 'Cols', min: 3, max: 30, cb: () => getSheet()?.reload?.() },
-  { key: 'actionBar', dflt: true, name: 'Action Bar', cb: b => {
+  { key: 'rows', defaultValue: 25, name: 'Rows', min: 10, max: 60, onChange: () => getSheet()?.reload?.() },
+  { key: 'cols', defaultValue: 7, name: 'Cols', min: 3, max: 30, onChange: () => getSheet()?.reload?.() },
+  { key: 'actionBar', defaultValue: true, name: 'Action Bar', onChange: (isVisible) => {
     const header = typeof document !== 'undefined' && (document.getElementById('header') || document.querySelector('header'));
     if (header) {
-      header.classList.toggle('hidden', !b);
-      header.hidden = !b;
-      header.style.display = b ? 'flex' : 'none';
+      header.classList.toggle('hidden', !isVisible);
+      header.hidden = !isVisible;
+      header.style.display = isVisible ? 'flex' : 'none';
     }
-    getSheet()?.scrollbarRefresh?.();
+    getSheet()?.refreshScrollbars?.();
   } },
-  { key: 'purple', dflt: true, name: 'Warning color on line return, comma and double quote values', cb: () => getSheet()?.reload?.() },
+  { key: 'highlightNonCompliant', defaultValue: true, name: 'Warning color on line return, comma and double quote values', onChange: () => getSheet()?.reload?.() },
 
   { title: 'Csv Save' },
-  { key: 'encoding', dflt: 'utf-8', name: 'Encoding' },
-  { key: 'delimiter', dflt: ',', name: 'Delimiter', list: [',', ';', 'TAB', '|'], hide: true },
-  { key: 'save_fixed_width_size', dflt: 0, name: 'Minimum column size', min: 0, max: 100 },
-  { key: 'save_strict', dflt: false, name: 'Save-Strict (error on comma  or double quotes)' },
+  { key: 'encoding', defaultValue: 'utf-8', name: 'Encoding' },
+  { key: 'delimiter', defaultValue: ',', name: 'Delimiter', list: [',', ';', 'TAB', '|'], hide: true },
+  { key: 'fixedWidthSize', defaultValue: 0, name: 'Minimum column size', min: 0, max: 100 },
+  { key: 'strictSave', defaultValue: false, name: 'Save-Strict (error on comma  or double quotes)' },
 
   { title: 'Csv Open' },
-  { key: 'set_headers', dflt: true, name: 'Set headers' },
-  { key: 'trim', dflt: false, name: 'Remove empty rows and columns' },
-  { key: 'trim_unquoted', dflt: true, name: 'Trim unquoted whitespace' },
+  { key: 'freezeHeaderOnOpen', defaultValue: true, name: 'Set headers' },
+  { key: 'trim', defaultValue: false, name: 'Remove empty rows and columns' },
+  { key: 'trimUnquoted', defaultValue: true, name: 'Trim unquoted whitespace' },
 
   { title: 'Csv View Only' },
-  { key: 'editMaxFileSize', dflt: 10, name: 'Max editable file size (Mo)', min: 1, max: Infinity, stepMode: 'pow2' },
-  { key: 'vo_n_chunks', dflt: 8, name: 'Number of chunks loaded', min: 8, stepMode: 'pow2' },
-  { key: 'vo_n_rows', dflt: 8, name: 'Number of rows per chunk loaded', min: 8, stepMode: 'pow2' },
+  { key: 'editMaxFileSize', defaultValue: 10, name: 'Max editable file size (Mo)', min: 1, max: Infinity, stepMode: 'pow2' },
+  { key: 'previewChunks', defaultValue: 8, name: 'Number of chunks loaded', min: 8, stepMode: 'pow2' },
+  { key: 'previewRows', defaultValue: 8, name: 'Number of rows per chunk loaded', min: 8, stepMode: 'pow2' },
 
   { title: 'Sort' },
-  { key: 'sort_header', dflt: true, name: 'Ignore 1st row (header row)' },
-  { key: 'sort_num_first', dflt: false, name: 'Numbers are sorted before text' },
+  { key: 'sortIgnoreHeader', defaultValue: true, name: 'Ignore 1st row (header row)' },
+  { key: 'sortNumbersFirst', defaultValue: false, name: 'Numbers are sorted before text' },
 ];
 
-Setting.map = new Map(Setting.list.filter(s => s.key).map(s => [s.key, s]));
+Setting.map = new Map(Setting.list.filter(def => def.key).map(def => [def.key, def]));
 Setting.getDef = (key) => Setting.map.get(key);
 
-export { stg };
+export { settings };
 
 // --- Environment Detection & PWA State Manager ---
 
@@ -185,14 +192,14 @@ export function detectEnvironment(overrides = {}) {
     const validBrands = uaData.brands.filter(b => b?.brand && !/Not.*Brand/i.test(b.brand));
     if (validBrands.length > 0) {
       const preferred = validBrands.find(b => /Edge|Opera|Brave|Vivaldi|Chrome/i.test(b.brand)) || validBrands[0];
-      const bName = preferred.brand;
+      const brandName = preferred.brand;
       browserVersion = preferred.version || (chromeMatch ? chromeMatch[1] : '');
       isChromium = os !== 'ios';
-      if (/Edge/i.test(bName)) { browser = 'edge'; browserName = 'Microsoft Edge'; }
-      else if (/Opera/i.test(bName)) { browser = 'opera'; browserName = 'Opera'; }
-      else if (/Brave/i.test(bName)) { browser = 'chrome'; browserName = 'Brave'; }
-      else if (/Vivaldi/i.test(bName)) { browser = 'chrome'; browserName = 'Vivaldi'; }
-      else { browser = 'chrome'; browserName = bName === 'Google Chrome' ? 'Chrome' : bName; }
+      if (/Edge/i.test(brandName)) { browser = 'edge'; browserName = 'Microsoft Edge'; }
+      else if (/Opera/i.test(brandName)) { browser = 'opera'; browserName = 'Opera'; }
+      else if (/Brave/i.test(brandName)) { browser = 'chrome'; browserName = 'Brave'; }
+      else if (/Vivaldi/i.test(brandName)) { browser = 'chrome'; browserName = 'Vivaldi'; }
+      else { browser = 'chrome'; browserName = brandName === 'Google Chrome' ? 'Chrome' : brandName; }
     }
   }
 
@@ -224,12 +231,12 @@ export function detectEnvironment(overrides = {}) {
 
 export const env = detectEnvironment();
 
-export function formatShortcut(c) {
-  if (!c?.k) return '';
+export function formatShortcut(command) {
+  if (!command?.key) return '';
   const mod = env.isMac ? '⌘' : 'Ctrl+';
   const shift = env.isMac ? '⇧' : 'Shift+';
   const alt = env.isMac ? '⌥' : 'Alt+';
-  return `${c.ctrl ? mod : ''}${c.alt ? alt : ''}${c.shift ? shift : ''}${c.k}`;
+  return `${command.ctrl ? mod : ''}${command.alt ? alt : ''}${command.shift ? shift : ''}${command.key}`;
 }
 
 export function getNewIssueUrl(appVersion, customEnv = env) {
@@ -317,9 +324,9 @@ export function createPwaManager(options = {}) {
     }
   }
 
-  const onBeforeInstallPrompt = (e) => {
-    e?.preventDefault?.();
-    deferredPrompt = e;
+  const onBeforeInstallPrompt = (event) => {
+    event?.preventDefault?.();
+    deferredPrompt = event;
     authoritativeState = 'not-installed';
     storageInstalled = false;
     writeStorageInstalled(false);
@@ -334,9 +341,9 @@ export function createPwaManager(options = {}) {
     notify();
   };
 
-  const onStorage = (e) => {
-    if (e && e.key !== null && e.key !== undefined && e.key !== PWA_INSTALLED_KEY) return;
-    const nextVal = e?.key === PWA_INSTALLED_KEY ? e.newValue === 'true' : readStorageInstalled();
+  const onStorage = (event) => {
+    if (event && event.key !== null && event.key !== undefined && event.key !== PWA_INSTALLED_KEY) return;
+    const nextVal = event?.key === PWA_INSTALLED_KEY ? event.newValue === 'true' : readStorageInstalled();
     storageInstalled = nextVal;
     if (nextVal) {
       authoritativeState = 'installed';
@@ -347,8 +354,8 @@ export function createPwaManager(options = {}) {
     notify();
   };
 
-  const onDisplayModeChange = (e) => {
-    isStandalone = Boolean(e?.matches || checkStandalone());
+  const onDisplayModeChange = (event) => {
+    isStandalone = Boolean(event?.matches || checkStandalone());
     if (isStandalone) {
       authoritativeState = 'installed';
       storageInstalled = true;
@@ -357,14 +364,14 @@ export function createPwaManager(options = {}) {
     notify();
   };
 
-  let mql = null;
+  let mediaQueryList = null;
   if (typeof win?.addEventListener === 'function') {
     win.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
     win.addEventListener('appinstalled', onAppInstalled);
     win.addEventListener('storage', onStorage);
     try {
-      mql = win.matchMedia?.('(display-mode: standalone)');
-      mql?.addEventListener?.('change', onDisplayModeChange);
+      mediaQueryList = win.matchMedia?.('(display-mode: standalone)');
+      mediaQueryList?.addEventListener?.('change', onDisplayModeChange);
     } catch {}
   }
 
@@ -427,7 +434,7 @@ export function createPwaManager(options = {}) {
       win.removeEventListener('appinstalled', onAppInstalled);
       win.removeEventListener('storage', onStorage);
     }
-    mql?.removeEventListener?.('change', onDisplayModeChange);
+    mediaQueryList?.removeEventListener?.('change', onDisplayModeChange);
   }
 
   return { getState, subscribe, promptInstall, checkRelatedApps, destroy };

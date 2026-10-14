@@ -6,14 +6,14 @@
 
 import { Dataframe, orderRange, isUrl, isIsoDate } from '../../core/Dataframe.js';
 import { CsvParser, CsvSerializer, SeparatorDetector } from '../../core/Csv.js';
-import { getSheet, setSheet, Setting, stg } from './state.js';
-import { dom, footerUpdate, scrollbarRefresh } from './AppLayout.js';
+import { getSheet, setSheet, Setting, settings } from './state.js';
+import { dom, updateFooter, refreshScrollbars } from './AppLayout.js';
 import { FinderDialog, FilterDialog } from './SheetOverlays.js';
 import { Notification } from './Notification.js';
 
 const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
-let dragTarget = null; // 'cell' | 'rowH' | 'colH' | 'allH' | 'scrollY' | 'scrollX' | null
+let dragTarget = null; // 'cell' | 'rowHeader' | 'colHeader' | 'cornerHeader' | 'scrollY' | 'scrollX' | null
 let mouseX = 0;
 let mouseY = 0;
 let scrollIntervalId = null;
@@ -24,15 +24,15 @@ let globalMouseBound = false;
 function getScrollBoundsY(sheet) {
   if (!sheet.rows[1]) return null;
   const offset = sheet.rows[1].getBoundingClientRect().top;
-  const theight = Math.max(1, sheet.getBoundingClientRect().bottom - offset);
-  return { offset, theight };
+  const trackHeight = Math.max(1, sheet.getBoundingClientRect().bottom - offset);
+  return { offset, trackHeight };
 }
 
 function getScrollBoundsX(sheet) {
   if (!sheet.rows[0]?.cells[0]) return null;
   const offset = sheet.rows[0].cells[0].getBoundingClientRect().left;
-  const tWidth = Math.max(1, sheet.getBoundingClientRect().right - offset);
-  return { offset, tWidth };
+  const trackWidth = Math.max(1, sheet.getBoundingClientRect().right - offset);
+  return { offset, trackWidth };
 }
 
 function startOutOfBoundsScroll() {
@@ -44,29 +44,29 @@ function startOutOfBoundsScroll() {
       scrollIntervalId = null;
       return;
     }
-    let change = false;
+    let changed = false;
     const rect = sheet.getBoundingClientRect();
     if (mouseY <= rect.top) {
       if (sheet.rangeEnd) sheet.rangeEnd.y = sheet.baseY;
       sheet.baseY--;
-      change = true;
+      changed = true;
     }
     if (mouseX >= rect.right - 5) {
       if (sheet.rangeEnd) sheet.rangeEnd.x = sheet.baseX + sheet.width - 1;
       sheet.baseX++;
-      change = true;
+      changed = true;
     }
     if (mouseY >= rect.bottom) {
       if (sheet.rangeEnd) sheet.rangeEnd.y = sheet.baseY + sheet.height - 1;
       sheet.baseY++;
-      change = true;
+      changed = true;
     }
     if (mouseX <= rect.left + 5) {
       if (sheet.rangeEnd) sheet.rangeEnd.x = sheet.baseX;
       sheet.baseX--;
-      change = true;
+      changed = true;
     }
-    if (change) sheet.slctRefresh(false);
+    if (changed) sheet.refreshSelection(false);
   }, 100);
 }
 
@@ -74,15 +74,15 @@ function bindGlobalMouse() {
   if (globalMouseBound || typeof document === 'undefined') return;
   globalMouseBound = true;
 
-  document.addEventListener('contextmenu', (e) => {
-    if (!e.ctrlKey && dom?.cmenu) {
-      e.preventDefault();
-      dom.cmenu.pop(e);
+  document.addEventListener('contextmenu', (event) => {
+    if (!event.ctrlKey && dom?.contextMenu) {
+      event.preventDefault();
+      dom.contextMenu.openAt(event);
     }
   });
 
-  document.addEventListener('mouseup', (e) => {
-    if (e.buttons < 1) {
+  document.addEventListener('mouseup', (event) => {
+    if (event.buttons < 1) {
       dragTarget = null;
       cachedScrollY = null;
       cachedScrollX = null;
@@ -93,67 +93,67 @@ function bindGlobalMouse() {
     }
   });
 
-  document.addEventListener('mousedown', (e) => {
-    const isSelectable = Boolean(e.target.closest?.('ui-about'));
-    if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON' && !isSelectable) {
-      e.preventDefault();
+  document.addEventListener('mousedown', (event) => {
+    const isSelectable = Boolean(event.target.closest?.('ui-about'));
+    if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'BUTTON' && !isSelectable) {
+      event.preventDefault();
     }
-    if (e.target.tagName !== 'INPUT' && document.activeElement?.tagName === 'INPUT') {
+    if (event.target.tagName !== 'INPUT' && document.activeElement?.tagName === 'INPUT') {
       document.activeElement.blur();
     }
-    if (e.button !== 0) return;
+    if (event.button !== 0) return;
 
     const sheet = getSheet();
     if (!sheet) return;
 
-    if (e.target === dom?.content?.scrollerY) {
+    if (event.target === dom?.content?.scrollerY) {
       dragTarget = 'scrollY';
       cachedScrollY = getScrollBoundsY(sheet);
       return;
     }
-    if (e.target === dom?.content?.scrollerX) {
+    if (event.target === dom?.content?.scrollerX) {
       dragTarget = 'scrollX';
       cachedScrollX = getScrollBoundsX(sheet);
       return;
     }
 
-    const cell = e.target.closest?.('td, th');
+    const cell = event.target.closest?.('td, th');
     if (!cell || !sheet.contains(cell)) {
       dragTarget = null;
       return;
     }
 
-    if (cell.tx < 0 && cell.ty < 0) {
-      dragTarget = 'allH';
-      sheet.slctAll();
-    } else if (cell.ty < 0) {
-      dragTarget = 'colH';
-      const col = cell.tx + sheet.baseX;
-      sheet.slctCol(e.shiftKey ? sheet.x : col, col);
+    if (cell.colOffset < 0 && cell.rowOffset < 0) {
+      dragTarget = 'cornerHeader';
+      sheet.selectAll();
+    } else if (cell.rowOffset < 0) {
+      dragTarget = 'colHeader';
+      const col = cell.colOffset + sheet.baseX;
+      sheet.selectCol(event.shiftKey ? sheet.x : col, col);
       startOutOfBoundsScroll();
-    } else if (cell.tx < 0) {
-      dragTarget = 'rowH';
-      const row = cell.ty + sheet.baseY;
-      sheet.slctRow(e.shiftKey ? sheet.y : row, row);
+    } else if (cell.colOffset < 0) {
+      dragTarget = 'rowHeader';
+      const row = cell.rowOffset + sheet.baseY;
+      sheet.selectRow(event.shiftKey ? sheet.y : row, row);
       startOutOfBoundsScroll();
     } else {
       dragTarget = 'cell';
-      sheet.slctRange = Boolean(e.shiftKey);
-      if (!e.shiftKey) sheet.rangeEnd = undefined;
-      sheet.x = cell.tx + sheet.baseX;
-      sheet.y = cell.ty + sheet.baseY;
-      if (e.ctrlKey && cell.firstElementChild?.classList.contains('url')) {
+      sheet.isSelectingRange = Boolean(event.shiftKey);
+      if (!event.shiftKey) sheet.rangeEnd = undefined;
+      sheet.x = cell.colOffset + sheet.baseX;
+      sheet.y = cell.rowOffset + sheet.baseY;
+      if (event.ctrlKey && cell.firstElementChild?.classList.contains('url')) {
         window.open(cell.innerText, '_blank');
       }
-      sheet.slctRefresh();
+      sheet.refreshSelection();
       startOutOfBoundsScroll();
     }
   });
 
-  document.addEventListener('mousemove', (e) => {
-    mouseX = e.clientX;
-    mouseY = e.clientY;
-    if (e.buttons < 1) {
+  document.addEventListener('mousemove', (event) => {
+    mouseX = event.clientX;
+    mouseY = event.clientY;
+    if (event.buttons < 1) {
       dragTarget = null;
       cachedScrollY = null;
       cachedScrollX = null;
@@ -164,16 +164,16 @@ function bindGlobalMouse() {
     if (dragTarget === 'scrollY') {
       cachedScrollY ||= getScrollBoundsY(sheet);
       if (cachedScrollY) {
-        const r = Math.max(0, Math.min(1, (e.clientY - cachedScrollY.offset) / cachedScrollY.theight));
-        sheet.baseY = Math.floor(sheet.rowCount * r);
-        sheet.slctRefresh(false);
+        const ratio = Math.max(0, Math.min(1, (event.clientY - cachedScrollY.offset) / cachedScrollY.trackHeight));
+        sheet.baseY = Math.floor(sheet.rowCount * ratio);
+        sheet.refreshSelection(false);
       }
     } else if (dragTarget === 'scrollX') {
       cachedScrollX ||= getScrollBoundsX(sheet);
       if (cachedScrollX) {
-        const r = Math.max(0, Math.min(1, (e.clientX - cachedScrollX.offset) / cachedScrollX.tWidth));
-        sheet.baseX = Math.floor(sheet.df.width * r);
-        sheet.slctRefresh(false);
+        const ratio = Math.max(0, Math.min(1, (event.clientX - cachedScrollX.offset) / cachedScrollX.trackWidth));
+        sheet.baseX = Math.floor(sheet.df.width * ratio);
+        sheet.refreshSelection(false);
       }
     }
   });
@@ -196,18 +196,18 @@ export class Sheet extends BaseElement {
 
     this.filterRows = null;
     this.inputField = document.createElement('input');
-    this.inputing = false;
-    this.nViewCols = stg.cols;
-    this.nViewRows = stg.rows;
-    this.escape = false;
+    this.isEditing = false;
+    this.viewCols = settings.cols;
+    this.viewRows = settings.rows;
+    this.cancelEditOnBlur = false;
     this.fixTop = false;
-    this.slctRange = false;
+    this.isSelectingRange = false;
     this.rangeEnd = undefined;
     this.expandedCol = null;
     this._x = 0;
     this._y = 0;
-    this._bx = 0;
-    this._by = 0;
+    this._baseX = 0;
+    this._baseY = 0;
     this._selectedCells = [];
 
     this.id = 'sheet';
@@ -245,35 +245,35 @@ export class Sheet extends BaseElement {
   get rowCount() { return this.filterRows ? this.filterRows.length : this.df.height; }
 
   get x() { return this._x; }
-  set x(n) {
-    if (this.inputing) this.inputBlur();
-    if (!this.slctRange) this.rangeEnd = undefined;
+  set x(col) {
+    if (this.isEditing) this.commitEdit();
+    if (!this.isSelectingRange) this.rangeEnd = undefined;
     else if (!this.rangeEnd) this.rangeEnd = { x: this._x, y: this._y };
-    this._x = Math.max(0, n);
+    this._x = Math.max(0, col);
   }
 
   get y() { return this._y; }
-  set y(n) {
-    if (this.inputing) this.inputBlur();
-    if (!this.slctRange) this.rangeEnd = undefined;
+  set y(row) {
+    if (this.isEditing) this.commitEdit();
+    if (!this.isSelectingRange) this.rangeEnd = undefined;
     else if (!this.rangeEnd) this.rangeEnd = { x: this._x, y: this._y };
-    this._y = Math.max(0, n);
+    this._y = Math.max(0, row);
   }
 
-  get baseX() { return this._bx; }
-  set baseX(n) {
-    const next = Math.max(0, n);
-    if (next !== this._bx) {
-      this._bx = next;
+  get baseX() { return this._baseX; }
+  set baseX(col) {
+    const next = Math.max(0, col);
+    if (next !== this._baseX) {
+      this._baseX = next;
       this.refresh();
     }
   }
 
-  get baseY() { return this._by; }
-  set baseY(n) {
-    const next = Math.max(0, n);
-    if (next !== this._by) {
-      this._by = next;
+  get baseY() { return this._baseY; }
+  set baseY(row) {
+    const next = Math.max(0, row);
+    if (next !== this._baseY) {
+      this._baseY = next;
       this.refresh();
     }
   }
@@ -282,22 +282,22 @@ export class Sheet extends BaseElement {
 
   reload() {
     while (this.table.rows[0]) this.table.rows[0].remove();
-    for (let y = 0; y < this.nViewRows + 1; y++) {
+    for (let y = 0; y < this.viewRows + 1; y++) {
       const tr = document.createElement('tr');
       this.table.appendChild(tr);
-      for (let x = 0; x < this.nViewCols + 1; x++) {
+      for (let x = 0; x < this.viewCols + 1; x++) {
         const cell = document.createElement('td');
-        cell.tx = x - 1;
-        cell.ty = y - 1;
+        cell.colOffset = x - 1;
+        cell.rowOffset = y - 1;
 
-        if (x === 0 || y === 0) cell.classList.add('tHeader');
-        if (y === 0) cell.classList.add('tColHeader');
-        if (x === 0) cell.classList.add('tRowHeader');
+        if (x === 0 || y === 0) cell.classList.add('cell-header');
+        if (y === 0) cell.classList.add('col-header');
+        if (x === 0) cell.classList.add('row-header');
 
         if (y === 0 && x > 0) {
-          const hdrTxt = document.createElement('span');
-          hdrTxt.classList.add('noclick');
-          cell.appendChild(hdrTxt);
+          const headerText = document.createElement('span');
+          headerText.classList.add('noclick');
+          cell.appendChild(headerText);
         } else if (y > 0) {
           cell.appendChild(document.createElement('div'));
         }
@@ -305,144 +305,150 @@ export class Sheet extends BaseElement {
       }
     }
     this.refresh();
-    this.slctRefresh(false);
+    this.refreshSelection(false);
   }
 
   refresh() {
     if (this._refreshRafId) cancelAnimationFrame(this._refreshRafId);
     this._refreshRafId = requestAnimationFrame(() => {
       this._refreshRafId = null;
-      for (let x = 0; x < this.width; x++) this.loadTopHeader(x);
+      for (let x = 0; x < this.width; x++) this.renderColHeader(x);
       for (let y = 0; y < this.height; y++) {
         const actualY = this.getRowIndex(this.baseY + y);
-        this.loadLeftHeader(y, actualY);
+        this.renderRowHeader(y, actualY);
         for (let x = 0; x < this.width; x++) {
-          this.loadCell(this.rows[y + 1].cells[x + 1], this.baseX + x, actualY);
+          this.renderCell(this.rows[y + 1].cells[x + 1], this.baseX + x, actualY);
         }
       }
-      const cell = this.bestInputCell();
-      if (this.inputing && cell && this.inputField.parentNode !== cell) {
-        cell.appendChild(this.inputField);
+      const activeCell = this.getActiveCellElement();
+      if (this.isEditing && activeCell && this.inputField.parentNode !== activeCell) {
+        activeCell.appendChild(this.inputField);
       }
-      footerUpdate(this);
+      updateFooter(this);
     });
   }
 
-  loadCell(c, x, y) {
-    const div = c?.firstChild;
-    if (!div) return;
+  refreshScrollbars() {
+    refreshScrollbars(this);
+  }
+
+  renderCell(cellEl, x, y) {
+    const contentDiv = cellEl?.firstChild;
+    if (!contentDiv) return;
     if (y < 0 || y >= this.df.height) {
-      div.className = '';
-      div.textContent = '';
+      contentDiv.className = '';
+      contentDiv.textContent = '';
       return;
     }
 
-    const d = this.df.get(x, y);
-    if (!d) {
-      div.className = '';
-      div.textContent = '';
+    const value = this.df.get(x, y);
+    if (!value) {
+      contentDiv.className = '';
+      contentDiv.textContent = '';
       return;
     }
 
-    let cls = '';
-    if (d[0] === '!') cls += ' error';
-    if (!isNaN(d)) cls += ' num';
-    if (isIsoDate(d)) cls += ' date';
-    if (isUrl(d)) cls += ' url';
-    if (stg.purple && (d.includes(',') || d.includes('"') || d.includes('\n'))) cls += ' noComply';
+    let className = '';
+    if (value[0] === '!') className += ' error';
+    if (!isNaN(value)) className += ' num';
+    if (isIsoDate(value)) className += ' date';
+    if (isUrl(value)) className += ' url';
+    if (settings.highlightNonCompliant && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+      className += ' non-compliant';
+    }
 
-    div.className = cls.charCodeAt(0) === 32 ? cls.slice(1) : cls;
-    if (!d.includes('&') && !d.includes('<') && !d.includes('\n')) {
-      div.textContent = d;
+    contentDiv.className = className.charCodeAt(0) === 32 ? className.slice(1) : className;
+    if (!value.includes('&') && !value.includes('<') && !value.includes('\n')) {
+      contentDiv.textContent = value;
     } else {
-      div.innerHTML = d.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('\n', '<br>');
+      contentDiv.innerHTML = value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('\n', '<br>');
     }
   }
 
-  loadTopHeader(x) {
-    const cell = this.rows[0]?.cells[x + 1];
+  renderColHeader(viewX) {
+    const cell = this.rows[0]?.cells[viewX + 1];
     if (!cell) return;
-    const matrixX = this.baseX + x;
-    const hdr = this.fixTop ? this.df.get(matrixX, 0) : '';
-    cell.firstChild.textContent = hdr.length > 0 ? hdr : matrixX + 1;
+    const colIndex = this.baseX + viewX;
+    const headerText = this.fixTop ? this.df.get(colIndex, 0) : '';
+    cell.firstChild.textContent = headerText.length > 0 ? headerText : colIndex + 1;
 
     if (this.expandedCol !== null && this.expandedCol !== undefined) {
-      const isExp = matrixX === this.expandedCol;
-      cell.classList.toggle('col-expanded', isExp);
-      cell.classList.toggle('col-collapsed', !isExp);
-      cell.style.width = isExp ? '100%' : '0%';
+      const isExpanded = colIndex === this.expandedCol;
+      cell.classList.toggle('col-expanded', isExpanded);
+      cell.classList.toggle('col-collapsed', !isExpanded);
+      cell.style.width = isExpanded ? '100%' : '0%';
     } else {
       cell.classList.remove('col-expanded', 'col-collapsed');
-      cell.style.width = `${100.0 / (this.nViewCols || 10)}%`;
+      cell.style.width = `${100.0 / (this.viewCols || 10)}%`;
     }
   }
 
-  loadLeftHeader(y, actualY) {
-    const cell = this.rows[y + 1]?.cells[0];
+  renderRowHeader(viewY, actualY) {
+    const cell = this.rows[viewY + 1]?.cells[0];
     if (!cell) return;
-    const label = actualY !== undefined ? (actualY >= 0 ? String(actualY + 1) : '') : String(this.baseY + y + 1);
+    const label = actualY !== undefined ? (actualY >= 0 ? String(actualY + 1) : '') : String(this.baseY + viewY + 1);
     (cell.firstChild || cell).textContent = label;
   }
 
-  scrollbarRefresh() { scrollbarRefresh(this); }
-  footerUpdate() { footerUpdate(this); }
+  refreshScrollbars() { refreshScrollbars(this); }
+  updateFooter() { updateFooter(this); }
 
   // --- Events & Filtering ---
 
   bindEvents() {
-    this.addEventListener('wheel', (e) => this.scroll(e), { passive: false });
-    this.inputField.addEventListener('focusout', () => this.inputBlur());
-    this.inputField.addEventListener('keydown', (e) => {
-      const k = e.key.toUpperCase();
-      if (k === 'ENTER' && e.shiftKey) {
+    this.addEventListener('wheel', (event) => this.scroll(event), { passive: false });
+    this.inputField.addEventListener('focusout', () => this.commitEdit());
+    this.inputField.addEventListener('keydown', (event) => {
+      const key = event.key.toUpperCase();
+      if (key === 'ENTER' && event.shiftKey) {
         this.inputField.value += '\u25BE';
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === ';') {
-        e.preventDefault();
-        e.stopPropagation();
+      if ((event.ctrlKey || event.metaKey) && event.key === ';') {
+        event.preventDefault();
+        event.stopPropagation();
         this.insertDate();
         return;
       }
-      if (k === 'ESCAPE') {
-        this.escape = true;
+      if (key === 'ESCAPE') {
+        this.cancelEditOnBlur = true;
         this.inputField.blur();
         return;
       }
-      if (k === 'ENTER' || k === 'TAB' || k === 'ARROWUP' || k === 'ARROWDOWN') {
-        e.stopPropagation();
-        e.preventDefault();
+      if (key === 'ENTER' || key === 'TAB' || key === 'ARROWUP' || key === 'ARROWDOWN') {
+        event.stopPropagation();
+        event.preventDefault();
         this.inputField.blur();
-        if (k === 'TAB') this.x += e.shiftKey ? -1 : 1;
-        else if (k === 'ARROWUP') this.y--;
+        if (key === 'TAB') this.x += event.shiftKey ? -1 : 1;
+        else if (key === 'ARROWUP') this.y--;
         else this.y++;
-        this.slctRefresh();
+        this.refreshSelection();
         this.refresh();
       }
     });
 
-    this.addEventListener('mouseover', (e) => {
+    this.addEventListener('mouseover', (event) => {
       if (!dragTarget) return;
-      const td = e.target.closest('td');
-      if (!td || td.tx === undefined || td.ty === undefined) return;
+      const td = event.target.closest('td');
+      if (!td || td.colOffset === undefined || td.rowOffset === undefined) return;
 
       if (dragTarget === 'cell') {
-        this.rangeEnd = { x: td.tx + this.baseX, y: td.ty + this.baseY };
-        this.slctRefresh(false);
-      } else if (dragTarget === 'colH' && td.tx >= 0) {
-        this.slctCol(this.x, td.tx + this.baseX);
-      } else if (dragTarget === 'rowH' && td.ty >= 0) {
-        this.slctRow(this.y, td.ty + this.baseY);
+        this.rangeEnd = { x: td.colOffset + this.baseX, y: td.rowOffset + this.baseY };
+        this.refreshSelection(false);
+      } else if (dragTarget === 'colHeader' && td.colOffset >= 0) {
+        this.selectCol(this.x, td.colOffset + this.baseX);
+      } else if (dragTarget === 'rowHeader' && td.rowOffset >= 0) {
+        this.selectRow(this.y, td.rowOffset + this.baseY);
       }
     });
 
-    this.addEventListener('dblclick', (e) => {
-      const td = e.target.closest('td');
-      if (!td || td.tx === undefined || td.ty === undefined) return;
-      if (td.tx >= 0 && td.ty >= 0) {
-        if (!this.df?.lock) this.input();
-      } else if (td.ty < 0 && td.tx >= 0) {
-        const colIdx = this.baseX + td.tx;
+    this.addEventListener('dblclick', (event) => {
+      const td = event.target.closest('td');
+      if (!td || td.colOffset === undefined || td.rowOffset === undefined) return;
+      if (td.colOffset >= 0 && td.rowOffset >= 0) {
+        if (!this.df?.lock) this.startEdit();
+      } else if (td.rowOffset < 0 && td.colOffset >= 0) {
+        const colIdx = this.baseX + td.colOffset;
         this.expandedCol = this.expandedCol === colIdx ? null : colIdx;
         this.refresh();
       }
@@ -460,14 +466,14 @@ export class Sheet extends BaseElement {
     this.baseY = 0;
     this.y = 0;
     this.refresh();
-    this.slctRefresh(true);
+    this.refreshSelection(true);
   }
 
   clearFilter() {
     if (this.filterRows !== null) {
       this.filterRows = null;
       this.refresh();
-      this.slctRefresh(false);
+      this.refreshSelection(false);
     }
   }
 
@@ -477,60 +483,60 @@ export class Sheet extends BaseElement {
 
   // --- Selection & Viewport ---
 
-  rangeOrdered() {
+  getOrderedRange() {
     const end = this.rangeEnd || this;
     return orderRange({ xmin: this.x, xmax: end.x, ymin: this.y, ymax: end.y });
   }
 
-  rangeArray() {
-    return this.df.slice(this.rangeOrdered());
+  getSelectedMatrix() {
+    return this.df.slice(this.getOrderedRange());
   }
 
-  focus_cell(x, y) {
-    this.slctRange = false;
+  focusCell(x, y) {
+    this.isSelectingRange = false;
     this.rangeEnd = undefined;
     this.x = x;
     this.y = y;
-    this.slctRefresh(true);
+    this.refreshSelection(true);
   }
 
-  slctAll() {
+  selectAll() {
     this.x = 0;
     this.y = 0;
     this.rangeEnd = { x: this.df.width - 1, y: this.df.height - 1 };
-    this.slctRefresh(false);
+    this.refreshSelection(false);
   }
 
-  slctCol(n, m = n) {
-    this.x = n;
+  selectCol(startCol, endCol = startCol) {
+    this.x = startCol;
     this.y = 0;
-    this.rangeEnd = { x: m, y: Math.max(0, this.df.height - 1) };
-    this.slctRange = false;
-    this.slctRefresh(false);
+    this.rangeEnd = { x: endCol, y: Math.max(0, this.df.height - 1) };
+    this.isSelectingRange = false;
+    this.refreshSelection(false);
   }
 
-  slctRow(n, m = n) {
+  selectRow(startRow, endRow = startRow) {
     this.x = 0;
-    this.y = n;
-    this.rangeEnd = { x: Math.max(0, this.df.width - 1), y: m };
-    this.slctRange = false;
-    this.slctRefresh(false);
+    this.y = startRow;
+    this.rangeEnd = { x: Math.max(0, this.df.width - 1), y: endRow };
+    this.isSelectingRange = false;
+    this.refreshSelection(false);
   }
 
-  cellInView(x, y) {
+  isCellInView(x, y) {
     return x >= this.baseX && y >= this.baseY && x < this.baseX + this.width && y < this.baseY + this.height;
   }
 
-  bestInputCell() {
-    if (this.cellInView(this.x, this.y)) {
+  getActiveCellElement() {
+    if (this.isCellInView(this.x, this.y)) {
       return this.rows[this.y - this.baseY + 1]?.cells[this.x - this.baseX + 1];
     }
     if (this.rangeEnd) {
-      const r = this.rangeOrdered();
+      const range = this.getOrderedRange();
       const vxEnd = this.baseX + this.width;
       const vyEnd = this.baseY + this.height;
-      const rx = (this.baseX < r.xmin && vxEnd > r.xmin) ? r.xmin : (this.baseX > r.xmin && this.baseX <= r.xmax ? this.baseX : undefined);
-      const ry = (this.baseY < r.ymin && vyEnd > r.ymin) ? r.ymin : (this.baseY > r.ymin && this.baseY <= r.ymax ? this.baseY : undefined);
+      const rx = (this.baseX < range.xmin && vxEnd > range.xmin) ? range.xmin : (this.baseX > range.xmin && this.baseX <= range.xmax ? this.baseX : undefined);
+      const ry = (this.baseY < range.ymin && vyEnd > range.ymin) ? range.ymin : (this.baseY > range.ymin && this.baseY <= range.ymax ? this.baseY : undefined);
       if (rx !== undefined && ry !== undefined) {
         return this.rows[ry - this.baseY + 1]?.cells[rx - this.baseX + 1];
       }
@@ -538,7 +544,7 @@ export class Sheet extends BaseElement {
     return undefined;
   }
 
-  slctFocus() {
+  scrollToSelection() {
     if (this.x < this.baseX) this.baseX = this.x;
     else if (this.x >= this.baseX + this.width) this.baseX = this.x - this.width + 1;
 
@@ -546,96 +552,96 @@ export class Sheet extends BaseElement {
     else if (this.y >= this.baseY + this.height) this.baseY = this.y - this.height + 1;
   }
 
-  slctClear() {
+  clearSelectionHighlight() {
     if (this._selectedCells.length > 0) {
-      for (const cell of this._selectedCells) cell.classList.remove('slct');
+      for (const cell of this._selectedCells) cell.classList.remove('selected');
       this._selectedCells.length = 0;
     } else {
-      for (const cell of this.querySelectorAll('.slct')) cell.classList.remove('slct');
+      for (const cell of this.querySelectorAll('.selected')) cell.classList.remove('selected');
     }
   }
 
-  slctRefresh(focus = true) {
-    if (this._slctRafId) cancelAnimationFrame(this._slctRafId);
-    this._slctRafId = requestAnimationFrame(() => {
-      this._slctRafId = null;
-      this.slctClear();
-      scrollbarRefresh(this);
-      if (focus) this.slctFocus();
+  refreshSelection(scrollIntoView = true) {
+    if (this._selectionRafId) cancelAnimationFrame(this._selectionRafId);
+    this._selectionRafId = requestAnimationFrame(() => {
+      this._selectionRafId = null;
+      this.clearSelectionHighlight();
+      refreshScrollbars(this);
+      if (scrollIntoView) this.scrollToSelection();
 
-      const r = this.rangeOrdered();
-      const xStart = Math.max(0, r.xmin - this.baseX);
-      const xEnd = Math.min(this.width - 1, r.xmax - this.baseX);
-      const yStart = Math.max(0, r.ymin - this.baseY);
-      const yEnd = Math.min(this.height - 1, r.ymax - this.baseY);
+      const range = this.getOrderedRange();
+      const xStart = Math.max(0, range.xmin - this.baseX);
+      const xEnd = Math.min(this.width - 1, range.xmax - this.baseX);
+      const yStart = Math.max(0, range.ymin - this.baseY);
+      const yEnd = Math.min(this.height - 1, range.ymax - this.baseY);
 
       for (let x = xStart; x <= xEnd; x++) {
         for (let y = yStart; y <= yEnd; y++) {
           const cell = this.rows[y + 1]?.cells[x + 1];
           if (cell) {
-            cell.classList.add('slct');
+            cell.classList.add('selected');
             this._selectedCells.push(cell);
           }
         }
       }
-      footerUpdate(this);
+      updateFooter(this);
     });
   }
 
-  scroll(e) {
-    if (e.ctrlKey) {
-      e.preventDefault();
+  scroll(event) {
+    if (event.ctrlKey) {
+      event.preventDefault();
       const minRows = Setting.getDef?.('rows')?.min ?? 10;
       const minCols = Setting.getDef?.('cols')?.min ?? 3;
-      if (e.shiftKey) {
-        if (e.deltaY > 0) this.nViewRows++;
-        else if (e.deltaY < 0 && this.nViewRows > minRows) this.nViewRows--;
+      if (event.shiftKey) {
+        if (event.deltaY > 0) this.viewRows++;
+        else if (event.deltaY < 0 && this.viewRows > minRows) this.viewRows--;
       } else {
-        if (e.deltaY > 0) this.nViewCols++;
-        else if (e.deltaY < 0 && this.nViewCols > minCols) this.nViewCols--;
+        if (event.deltaY > 0) this.viewCols++;
+        else if (event.deltaY < 0 && this.viewCols > minCols) this.viewCols--;
       }
       this.reload();
       return;
     }
-    const step = (d) => d > 0 ? Math.floor(d / 16) : Math.ceil(d / 16);
-    if (e.altKey) {
-      this.baseX += step(e.deltaY);
+    const calcStep = (delta) => delta > 0 ? Math.floor(delta / 16) : Math.ceil(delta / 16);
+    if (event.altKey) {
+      this.baseX += calcStep(event.deltaY);
     } else {
-      this.baseX += step(e.deltaX);
-      this.baseY += step(e.deltaY);
+      this.baseX += calcStep(event.deltaX);
+      this.baseY += calcStep(event.deltaY);
     }
     this.refresh();
-    this.slctRefresh(false);
+    this.refreshSelection(false);
   }
 
   // --- Inline Cell Editing, Clipboard & Mutations ---
 
-  input(txt) {
+  startEdit(initialText) {
     if (this.df?.lock) return;
-    const cell = this.bestInputCell();
+    const cell = this.getActiveCellElement();
     if (!cell) return;
     const actualY = this.getRowIndex(this.y);
-    this.inputing = true;
-    this.inputField.value = txt || (actualY >= 0 ? this.df.get(this.x, actualY).replaceAll('\n', '\u25BE') : '');
+    this.isEditing = true;
+    this.inputField.value = initialText || (actualY >= 0 ? this.df.get(this.x, actualY).replaceAll('\n', '\u25BE') : '');
     cell.appendChild(this.inputField);
     this.inputField.focus();
   }
 
-  inputBlur() {
-    if (!this.inputing) return;
-    this.inputing = false;
-    const val = this.inputField.value.replaceAll('\u25BE', '\n');
-    if (!this.escape) {
-      this.rangeEdit(val);
-      if (!this.rangeEnd) this.loadCell(this.inputField.parentNode, this.x, this.y);
+  commitEdit() {
+    if (!this.isEditing) return;
+    this.isEditing = false;
+    const value = this.inputField.value.replaceAll('\u25BE', '\n');
+    if (!this.cancelEditOnBlur) {
+      this.editSelection(value);
+      if (!this.rangeEnd) this.renderCell(this.inputField.parentNode, this.x, this.y);
       else this.refresh();
     }
-    this.escape = false;
+    this.cancelEditOnBlur = false;
     this.inputField.remove();
   }
 
   copySelection() {
-    return new CsvSerializer({ delimiter: '\t' }).serialize(this.rangeArray());
+    return new CsvSerializer({ delimiter: '\t' }).serialize(this.getSelectedMatrix());
   }
 
   cutSelection() {
@@ -648,55 +654,55 @@ export class Sheet extends BaseElement {
   pasteText(rawText) {
     if (!rawText || this.df?.lock) return;
     const delimiter = rawText.includes('\t') ? '\t' : SeparatorDetector.detect(rawText);
-    const matrix = new CsvParser({ delimiter, trimUnquotedWhitespace: Boolean(stg?.trim_unquoted) }).parse(rawText);
+    const matrix = new CsvParser({ delimiter, trimUnquotedWhitespace: Boolean(settings?.trimUnquoted) }).parse(rawText);
     if (matrix?.length > 0) this.paste(matrix);
   }
 
   insertDate() {
-    const d = new Date();
-    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    if (this.inputing && this.inputField) {
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (this.isEditing && this.inputField) {
       const start = this.inputField.selectionStart || 0;
       const end = this.inputField.selectionEnd || 0;
       this.inputField.value = this.inputField.value.slice(0, start) + todayStr + this.inputField.value.slice(end);
       this.inputField.selectionStart = this.inputField.selectionEnd = start + todayStr.length;
     } else {
-      this.rangeEdit(todayStr);
+      this.editSelection(todayStr);
       this.refresh();
     }
   }
 
-  rangeEdit(value) {
-    this.df.editRange(this.rangeOrdered(), value);
+  editSelection(value) {
+    this.df.editRange(this.getOrderedRange(), value);
   }
 
   deleteSelection() {
-    this.rangeEdit('');
+    this.editSelection('');
     this.refresh();
   }
 
   deleteRows() {
-    const r = this.rangeOrdered();
-    this.df.deleteRows(r.ymin, r.ymax - r.ymin + 1);
-    this._y = r.ymin;
+    const range = this.getOrderedRange();
+    this.df.deleteRows(range.ymin, range.ymax - range.ymin + 1);
+    this._y = range.ymin;
     if (this.rangeEnd) {
-      this.rangeEnd.y = r.ymin;
+      this.rangeEnd.y = range.ymin;
       if (this.rangeEnd.x === this.x) this.rangeEnd = undefined;
     }
     this.refresh();
-    this.slctRefresh(false);
+    this.refreshSelection(false);
   }
 
   deleteCols() {
-    const r = this.rangeOrdered();
-    this.df.deleteCols(r.xmin, r.xmax - r.xmin + 1);
-    this._x = r.xmin;
+    const range = this.getOrderedRange();
+    this.df.deleteCols(range.xmin, range.xmax - range.xmin + 1);
+    this._x = range.xmin;
     if (this.rangeEnd) {
-      this.rangeEnd.x = r.xmin;
+      this.rangeEnd.x = range.xmin;
       if (this.rangeEnd.y === this.y) this.rangeEnd = undefined;
     }
     this.refresh();
-    this.slctRefresh(false);
+    this.refreshSelection(false);
   }
 
   undo() { this.df.undo(); this.refresh(); }
@@ -706,21 +712,21 @@ export class Sheet extends BaseElement {
 
   expand() {
     if (this.rangeEnd) {
-      this.df.fillSeries(this.rangeOrdered());
+      this.df.fillSeries(this.getOrderedRange());
       this.refresh();
     }
   }
 
   shift(direction) {
-    const r = this.rangeOrdered();
-    const rows = r.ymax - r.ymin + 1;
-    const cols = r.xmax - r.xmin + 1;
+    const range = this.getOrderedRange();
+    const rows = range.ymax - range.ymin + 1;
+    const cols = range.xmax - range.xmin + 1;
     let dx = 0, dy = 0, moved = false;
 
-    if (direction === 0 && this.df.shiftRows(r.ymin, rows, 'up')) { dy = -1; moved = true; }
-    else if (direction === 1 && this.df.shiftCols(r.xmin, cols, 'right')) { dx = 1; moved = true; }
-    else if (direction === 2 && this.df.shiftRows(r.ymin, rows, 'down')) { dy = 1; moved = true; }
-    else if (direction === 3 && this.df.shiftCols(r.xmin, cols, 'left')) { dx = -1; moved = true; }
+    if (direction === 0 && this.df.shiftRows(range.ymin, rows, 'up')) { dy = -1; moved = true; }
+    else if (direction === 1 && this.df.shiftCols(range.xmin, cols, 'right')) { dx = 1; moved = true; }
+    else if (direction === 2 && this.df.shiftRows(range.ymin, rows, 'down')) { dy = 1; moved = true; }
+    else if (direction === 3 && this.df.shiftCols(range.xmin, cols, 'left')) { dx = -1; moved = true; }
 
     if (moved) {
       const end = this.rangeEnd ? { x: this.rangeEnd.x + dx, y: this.rangeEnd.y + dy } : undefined;
@@ -729,7 +735,7 @@ export class Sheet extends BaseElement {
       this.rangeEnd = end;
     }
     this.refresh();
-    this.slctRefresh();
+    this.refreshSelection();
   }
 
   insert(direction) {
@@ -738,57 +744,57 @@ export class Sheet extends BaseElement {
     else if (direction === 2) { this.df.insertRow(this.y + 1); }
     else if (direction === 3) { this.df.insertCol(this.x); this.x++; }
     this.refresh();
-    this.slctRefresh();
+    this.refreshSelection();
   }
 
-  rangeTranspose() {
+  transposeSelection() {
     if (this.df.lock) return;
     if (!this.rangeEnd) {
       this.df.transpose();
-      this.focus_cell(
+      this.focusCell(
         Math.min(this.y, Math.max(0, this.df.width - 1)),
         Math.min(this.x, Math.max(0, this.df.height - 1))
       );
-      scrollbarRefresh(this);
+      refreshScrollbars(this);
       this.refresh();
       return;
     }
-    const r = this.rangeOrdered();
-    this.df.transpose(r);
-    this.rangeEnd = { x: r.xmin + (r.ymax - r.ymin), y: r.ymin + (r.xmax - r.xmin) };
+    const range = this.getOrderedRange();
+    this.df.transpose(range);
+    this.rangeEnd = { x: range.xmin + (range.ymax - range.ymin), y: range.ymin + (range.xmax - range.xmin) };
     this.refresh();
   }
 
   round(integer = true) {
-    this.df.roundRange(this.rangeOrdered(), integer);
+    this.df.roundRange(this.getOrderedRange(), integer);
     this.refresh();
   }
 
-  paste(mat) {
-    const r = this.rangeOrdered();
-    this.df.pasteMatrix(r.xmin, r.ymin, mat);
+  paste(matrix) {
+    const range = this.getOrderedRange();
+    this.df.pasteMatrix(range.xmin, range.ymin, matrix);
     this.refresh();
   }
 
-  sort(n = this.x, ascending = true) {
-    this.df.sort(n, {
+  sort(colIndex = this.x, ascending = true) {
+    this.df.sort(colIndex, {
       ascending,
-      hasHeader: Boolean(stg.sort_header),
-      numbersFirst: Boolean(stg.sort_num_first)
+      hasHeader: Boolean(settings.sortIgnoreHeader),
+      numbersFirst: Boolean(settings.sortNumbersFirst)
     });
     this.refresh();
   }
 
-  find(advanced = false) {
-    this.finder.findMenu(this.df.get(this.x, this.y), advanced);
-    if (!advanced) scrollbarRefresh(this);
+  find(isAdvanced = false) {
+    this.finder.open(this.df.get(this.x, this.y), isAdvanced);
+    if (!isAdvanced) refreshScrollbars(this);
   }
 
-  go_to_occurrence(forward = true) {
+  goToOccurrence(forward = true) {
     if (!this.df || this.df.width === 0 || this.df.height === 0) return;
     const next = this.df.goToMatching({ x: this.x, y: this.y }, forward ? 1 : -1);
     if (!next) Notification.quick('No match');
-    else this.focus_cell(next.x, next.y);
+    else this.focusCell(next.x, next.y);
   }
 
   disconnectedCallback() {
@@ -796,9 +802,9 @@ export class Sheet extends BaseElement {
       cancelAnimationFrame(this._refreshRafId);
       this._refreshRafId = null;
     }
-    if (this._slctRafId && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(this._slctRafId);
-      this._slctRafId = null;
+    if (this._selectionRafId && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this._selectionRafId);
+      this._selectionRafId = null;
     }
   }
 }

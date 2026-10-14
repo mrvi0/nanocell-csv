@@ -9,13 +9,10 @@ try {
 const iconMap = new Map();
 
 for (const [path, url] of Object.entries(iconModules)) {
-  const rel = path.replace(/^\.\.\/icons\//, '');
-  const name = rel.replace(/\.svg$/, '');
-  iconMap.set(rel, url);
-  iconMap.set(name, url);
-  iconMap.set(`icn/${rel}`, url);
-  iconMap.set(`icn/${name}`, url);
-  iconMap.set(`/app/icn/${rel}`, url);
+  const filename = path.replace(/^\.\.\/icons\//, '');
+  const iconName = filename.replace(/\.svg$/, '');
+  iconMap.set(filename, url);
+  iconMap.set(iconName, url);
 }
 
 if (iconMap.has('on')) {
@@ -28,15 +25,15 @@ if (iconMap.has('off')) {
   iconMap.set('close', iconMap.get('off'));
 }
 
-export function getIconUrl(name) {
-  if (!name) return '';
-  let clean = name.trim().replace(/^url\(["']?|["']?\)$/g, '');
-  if (iconMap.has(clean)) return iconMap.get(clean);
-  clean = clean.replace(/^\/?(app\/)?/, '');
-  if (iconMap.has(clean)) return iconMap.get(clean);
-  const withoutExt = clean.replace(/\.svg$/, '');
+export function getIconUrl(iconName) {
+  if (!iconName) return '';
+  let normalized = iconName.trim().replace(/^url\(["']?|["']?\)$/g, '');
+  if (iconMap.has(normalized)) return iconMap.get(normalized);
+  normalized = normalized.replace(/^\/?(app\/)?(icons\/)?/, '');
+  if (iconMap.has(normalized)) return iconMap.get(normalized);
+  const withoutExt = normalized.replace(/\.svg$/, '');
   if (iconMap.has(withoutExt)) return iconMap.get(withoutExt);
-  return iconMap.get(name) || name;
+  return iconMap.get(iconName) || iconName;
 }
 
 export function setIcon(element, iconName) {
@@ -48,10 +45,10 @@ export function setIcon(element, iconName) {
   }
 }
 
-export function escapeHtml(str) {
-  if (typeof str !== 'string') str = String(str ?? '');
-  if (!/[&<>"']/.test(str)) return str;
-  return str
+export function escapeHtml(text) {
+  if (typeof text !== 'string') text = String(text ?? '');
+  if (!/[&<>"']/.test(text)) return text;
+  return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

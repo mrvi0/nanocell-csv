@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { loadcsv, load_csv_view_only } from '../app/js/csv_worker.js';
+import { loadCsv, loadCsvViewOnly } from '../app/js/csvWorker.js';
 import { getSheet, setSheet } from '../app/js/state.js';
 import { Dataframe } from '../core/Dataframe.js';
 
@@ -46,7 +46,7 @@ if (typeof globalThis.document === 'undefined') {
 }
 
 const { CsvHandle } = await import('../app/js/CsvHandle.js');
-const { Setting, stg } = await import('../app/js/state.js');
+const { Setting, settings } = await import('../app/js/state.js');
 
 /**
  * Creates a File-like Blob with a `.name` property for headless Node testing.
@@ -99,7 +99,7 @@ function createMockFileHandle(initialContent: string, name = 'data.csv') {
 }
 
 /**
- * Creates an in-process worker adapter connected to `csv_worker.js` functions (`loadcsv` and `load_csv_view_only`).
+ * Creates an in-process worker adapter connected to `csvWorker.js` functions (`loadCsv` and `loadCsvViewOnly`).
  */
 function createWorkerAdapter() {
   const listeners = new Set<Function>();
@@ -127,9 +127,9 @@ function createWorkerAdapter() {
       const { cmd, data } = payload;
       if (cmd === 'read') {
         if (data.viewOnly) {
-          load_csv_view_only(data, postToClient);
+          loadCsvViewOnly(data, postToClient);
         } else {
-          loadcsv(data, postToClient);
+          loadCsv(data, postToClient);
         }
       }
     }
@@ -156,7 +156,7 @@ function createMockTestHarness(options: {
   const mockDocument: any = {
     title: 'csv',
     getElementById(id: string) {
-      if (id === 'footerCenter') return footerCenter;
+      if (id === 'footer-center') return footerCenter;
       return null;
     },
     createElement(tag: string) {
@@ -217,19 +217,19 @@ function createMockTestHarness(options: {
     };
   }
 
-  // Initialize with default "Hello World" sheet just like nanocell_cleanStart()
+  // Initialize with default "Hello World" sheet just like initApp()
   const createMockSheet = (df: Dataframe) => {
     const sheet: any = {
       df,
       fixTop: false,
       refreshCount: 0,
-      scrollbarRefreshCount: 0,
+      refreshScrollbarsCount: 0,
       reloadCount: 0,
       refresh() {
         this.refreshCount++;
       },
-      scrollbarRefresh() {
-        this.scrollbarRefreshCount++;
+      refreshScrollbars() {
+        this.refreshScrollbarsCount++;
       },
       reload() {
         this.reloadCount++;
@@ -547,7 +547,7 @@ export async function runFileOpenTests(): Promise<{ passed: number; failed: numb
 
     // 1. Reload with no file open returns quick notification
     const noFileNotif: any = csvHandle.reloadFile();
-    assert.strictEqual(noFileNotif.txt, 'No file to reload from.');
+    assert.strictEqual(noFileNotif.message, 'No file to reload from.');
 
     // 2. Open with FileSystemFileHandle, modify disk content, and reload
     const handle = createMockFileHandle('h1,h2\nv1,v2', 'reloadable.csv');
@@ -564,11 +564,11 @@ export async function runFileOpenTests(): Promise<{ passed: number; failed: numb
 
     // Calling reloadFile(false) should prompt choice instead of overwriting immediately
     const choiceNotif: any = csvHandle.reloadFile(false);
-    assert.strictEqual(choiceNotif.txt, 'Changes will be lost ? ');
+    assert.strictEqual(choiceNotif.message, 'Changes will be lost ? ');
     assert.strictEqual(getSheet().df.data[1][0], 'local_unsaved_edit');
 
     // Confirming the prompt triggers the reload from disk
-    await choiceNotif.opt.cbt();
+    await choiceNotif.options.onConfirm();
     await waitForReadComplete(csvHandle);
     assert.deepStrictEqual(getSheet().df.data, [
       ['h1', 'h2'],
@@ -592,12 +592,12 @@ export async function runFileOpenTests(): Promise<{ passed: number; failed: numb
     ]);
   });
 
-  await test('View-Only Mode: Files exceeding stg.editMaxFileSize load in locked View-Only sampled mode', async () => {
+  await test('View-Only Mode: Files exceeding settings.editMaxFileSize load in locked View-Only sampled mode', async () => {
     const { csvHandle } = createMockTestHarness();
     // Set max editable size to 0.0001 MB (100 bytes) so our test file triggers view-only mode
-    stg.editMaxFileSize = 0.0001;
-    stg.vo_n_chunks = 2;
-    stg.vo_n_rows = 2;
+    settings.editMaxFileSize = 0.0001;
+    settings.previewChunks = 2;
+    settings.previewRows = 2;
 
     const lines = ['colA,colB'];
     for (let i = 1; i <= 30; i++) {
@@ -626,7 +626,7 @@ export async function runFileOpenTests(): Promise<{ passed: number; failed: numb
       readId: 1,
       status: 0.5,
       chunk: [['FileA_Col1', 'FileA_Col2'], ['A1', 'A2']],
-      chunk_id: 1,
+      chunkId: 1,
       isFirstChunk: true,
       isComplete: false
     });
@@ -649,7 +649,7 @@ export async function runFileOpenTests(): Promise<{ passed: number; failed: numb
       readId: 1,
       status: 1.0,
       chunk: [['Stale_A3', 'Stale_A4']],
-      chunk_id: 2,
+      chunkId: 2,
       isFirstChunk: false,
       isComplete: true
     });

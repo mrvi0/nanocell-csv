@@ -37,7 +37,7 @@ body[data-theme] {
   --th-bg: var(--bg1);
   --th-txt: var(--txt-soft);
   --body-bg: var(--bg2);
-  --slct-bg: var(--bg1);
+  --selected-bg: var(--bg1);
   --fh-bg: var(--bg1);
   --fh-txt: var(--txt-soft);
   --table-borders: var(--border);
@@ -46,7 +46,7 @@ body[data-theme] {
   --input-bg-out: var(--bg2);
   --dots: var(--active, inherit);
   --cmenu-bg: var(--bg1);
-  --cmenuHover: var(--bg2);
+  --cmenu-hover: var(--bg2);
   --modal-bg: var(--bg1);
   --btn-bg: var(--bg2);
   --btn-txt: var(--txt);
@@ -81,7 +81,7 @@ body[data-theme="light"] {
   --icon-hover-color: #0066cc;
   --icon-hover-bg: rgba(0, 0, 0, 0.092);
   --modal-backdrop: rgba(15, 23, 42, 0.4);
-  --scrollBar: grey;
+  --scrollbar-color: grey;
   --scrollbar-thumb: #cbd5e1;
   --scrollbar-thumb-hover: #94a3b8;
   --scrollbar-track: #f8fafc;
@@ -108,12 +108,12 @@ body[data-theme="solarized"] {
   --txt-soft: #839496;
   --border: #d5cdc0;
   --active: var(--yellow);
-  --slct-bg: #e5ded0;
+  --selected-bg: #e5ded0;
   --icon-color: #93a1a1;
   --icon-hover-color: #268bd2;
   --icon-hover-bg: rgba(7, 54, 66, 0.05);
   --modal-backdrop: rgba(7, 54, 66, 0.4);
-  --scrollBar: #93a1a1;
+  --scrollbar-color: #93a1a1;
   --scrollbar-thumb: #d5cdc0;
   --scrollbar-thumb-hover: #93a1a1;
   --scrollbar-track: #eee8d5;
@@ -144,7 +144,7 @@ body[data-theme="dark"] {
   --icon-hover-color: #007acc;
   --icon-hover-bg: rgba(255, 255, 255, 0.092);
   --modal-backdrop: rgba(0, 0, 0, 0.75);
-  --scrollBar: #555;
+  --scrollbar-color: #555;
   --scrollbar-thumb: #3f3f46;
   --scrollbar-thumb-hover: #52525b;
   --scrollbar-track: #09090b;
@@ -175,7 +175,7 @@ body[data-theme="night"] {
   --icon-hover-color: #e05555;
   --icon-hover-bg: rgba(255, 255, 255, 0.092);
   --modal-backdrop: rgba(0, 0, 0, 0.75);
-  --scrollBar: #5a5a5a;
+  --scrollbar-color: #5a5a5a;
   --scrollbar-thumb: #3f3f46;
   --scrollbar-thumb-hover: #52525b;
   --scrollbar-track: #09090b;
@@ -206,7 +206,7 @@ body[data-theme="nord"] {
   --icon-hover-color: #88c0d0;
   --icon-hover-bg: rgba(236, 239, 244, 0.092);
   --modal-backdrop: rgba(15, 17, 23, 0.7);
-  --scrollBar: #4c566a;
+  --scrollbar-color: #4c566a;
   --scrollbar-thumb: #3b4252;
   --scrollbar-thumb-hover: #4c566a;
   --scrollbar-track: #242933;
@@ -237,7 +237,7 @@ body[data-theme="dracula"] {
   --icon-hover-color: #bd93f9;
   --icon-hover-bg: rgba(248, 248, 242, 0.092);
   --modal-backdrop: rgba(10, 10, 15, 0.75);
-  --scrollBar: #6272a4;
+  --scrollbar-color: #6272a4;
   --scrollbar-thumb: #44475a;
   --scrollbar-thumb-hover: #6272a4;
   --scrollbar-track: #21222c;
@@ -266,10 +266,10 @@ body[data-theme="slate"] {
   --active: var(--blue);
   --th-bg: #f8fafc;
   --th-txt: #475569;
-  --slct-bg: #e2e8f0;
+  --selected-bg: #e2e8f0;
   --table-borders: #e2e8f0;
   --cmenu-bg: #ffffff;
-  --cmenuHover: #f1f5f9;
+  --cmenu-hover: #f1f5f9;
   --modal-bg: #ffffff;
   --btn-txt: #334155;
   --btn-hover: #f1f5f9;
@@ -280,7 +280,7 @@ body[data-theme="slate"] {
   --icon-hover-color: var(--blue);
   --icon-hover-bg: rgba(15, 23, 42, 0.06);
   --modal-backdrop: rgba(15, 23, 42, 0.45);
-  --scrollBar: #94a3b8;
+  --scrollbar-color: #94a3b8;
   --scrollbar-thumb: #cbd5e1;
   --scrollbar-thumb-hover: #94a3b8;
   --scrollbar-track: #f8fafc;
@@ -385,16 +385,16 @@ footer {
   color: var(--fh-txt);
 }
 
-#footerLeft,
-#footerRight {
+#footer-left,
+#footer-right {
   color: var(--fh-txt);
   white-space: nowrap;
   flex-shrink: 0;
   font-family: var(--font-family-mono);
 }
 
-#footerLeft { cursor: pointer; }
-#footerLeft.editing { cursor: default; }
+#footer-left { cursor: pointer; }
+#footer-left.editing { cursor: default; }
 
 .coord-editor {
   display: inline-flex;
@@ -433,7 +433,7 @@ footer {
   margin: 0;
 }
 
-#footerCenter {
+#footer-center {
   color: var(--fh-txt);
   flex: 1;
   text-align: center;
@@ -446,7 +446,7 @@ footer {
   display: block;
 }
 
-.flexMain {
+.flex-main {
   flex-grow: 1;
   min-width: 36px;
 }
@@ -738,12 +738,12 @@ ui-sheet,
   font-weight: normal;
 }
 
-.sheet .tHeader {
+.sheet .cell-header {
   color: var(--th-txt);
   background-color: var(--th-bg);
 }
 
-.sheet .tColHeader {
+.sheet .col-header {
   height: 24px;
   text-align: center;
   position: relative;
@@ -761,7 +761,7 @@ ui-sheet,
 
 .noclick { pointer-events: none; }
 
-.sheet .tRowHeader {
+.sheet .row-header {
   text-align: end;
   width: 36px;
   padding: 0 6px;
@@ -795,20 +795,21 @@ ui-sheet,
   border: 2px solid var(--active);
 }
 
-.slct {
+.selected {
   color: inherit;
-  background-color: var(--slct-bg) !important;
+  background-color: var(--selected-bg) !important;
 }
 
 .date { color: var(--blue); text-align: center; justify-content: center; }
 .url { color: var(--blue); text-decoration: underline; }
 .num { text-align: right; color: var(--num-txt); justify-content: flex-end; }
 .error { color: var(--red); text-align: center; justify-content: center; }
+.non-compliant { color: var(--purple); }
 
 /* Grid Scroller (<ui-scroller>) */
 ui-scroller {
   display: block;
-  background-color: var(--scrollBar);
+  background-color: var(--scrollbar-color);
   border-radius: 4px;
   opacity: 0.5;
   z-index: 90;
@@ -861,7 +862,7 @@ ui-cmenu {
   font-family: var(--font-family-ui);
 }
 
-.cmenu_header {
+.cmenu-header {
   text-align: center;
   font-weight: 600;
   margin: 4px;
@@ -870,7 +871,7 @@ ui-cmenu {
   padding-bottom: 4px;
 }
 
-.cmenu_opt { text-align: right; }
+.cmenu-opt { text-align: right; }
 ui-cmenu div { margin: 4px 10px; }
 
 ui-cmenu table {
@@ -886,15 +887,15 @@ ui-cmenu[open] {
 }
 
 ui-cmenu tr { cursor: pointer; }
-ui-cmenu tr:hover { background-color: var(--cmenuHover); }
+ui-cmenu tr:hover { background-color: var(--cmenu-hover); }
 
 /* --------------------------------------------------------------------------
    7. Modals & Dialogs (#dialog)
    -------------------------------------------------------------------------- */
 #dialog { z-index: 2000; }
 
-.dialog_small,
-.dialog_large {
+.dialog-small,
+.dialog-large {
   line-height: normal;
   align-items: start;
   background-color: var(--modal-bg);
@@ -902,7 +903,7 @@ ui-cmenu tr:hover { background-color: var(--cmenuHover); }
   z-index: 2000;
 }
 
-.dialog_small {
+.dialog-small {
   max-height: 50vh;
   position: relative;
   border: 1px solid var(--table-borders);
@@ -911,7 +912,7 @@ ui-cmenu tr:hover { background-color: var(--cmenuHover); }
   padding: 16px;
 }
 
-.dialog_large {
+.dialog-large {
   position: fixed;
   top: 0;
   left: 0;
@@ -919,7 +920,7 @@ ui-cmenu tr:hover { background-color: var(--cmenuHover); }
   height: 100vh;
 }
 
-#closeDialog {
+#close-dialog {
   position: absolute;
   right: 12px;
   top: 12px;
@@ -928,7 +929,7 @@ ui-cmenu tr:hover { background-color: var(--cmenuHover); }
   pointer-events: auto !important;
 }
 
-.dialog_large #closeDialog { position: fixed; }
+.dialog-large #close-dialog { position: fixed; }
 
 /* --------------------------------------------------------------------------
    8. Command Palette (<ui-command-palette>)
@@ -940,7 +941,7 @@ ui-command-palette[open] {
   display: block;
 }
 
-.cmd_palette_backdrop {
+.cmd-palette-backdrop {
   position: fixed;
   top: 0;
   left: 0;
@@ -950,7 +951,7 @@ ui-command-palette[open] {
   z-index: 9999;
 }
 
-.cmd_palette_modal {
+.cmd-palette-modal {
   position: fixed;
   top: 15%;
   left: 50%;
@@ -969,14 +970,14 @@ ui-command-palette[open] {
   flex-direction: column;
 }
 
-.cmd_palette_header {
+.cmd-palette-header {
   display: flex;
   align-items: center;
   padding: 8px 12px;
   border-bottom: 1px solid var(--table-borders);
 }
 
-.cmd_palette_input {
+.cmd-palette-input {
   flex: 1;
   border: none;
   background: transparent;
@@ -987,17 +988,17 @@ ui-command-palette[open] {
   padding: 4px 8px;
 }
 
-.cmd_palette_input:focus {
+.cmd-palette-input:focus {
   outline: none;
   box-shadow: none;
 }
 
-.cmd_palette_close.icon {
+.cmd-palette-close.icon {
   cursor: pointer !important;
   pointer-events: auto !important;
 }
 
-.cmd_palette_list {
+.cmd-palette-list {
   max-height: 320px;
   overflow-y: auto;
   margin: 0;
@@ -1005,7 +1006,7 @@ ui-command-palette[open] {
   list-style: none;
 }
 
-.cmd_palette_item {
+.cmd-palette-item {
   padding: 10px 16px;
   display: flex;
   justify-content: space-between;
@@ -1014,16 +1015,16 @@ ui-command-palette[open] {
   border-left: 3px solid transparent;
 }
 
-.cmd_palette_item:hover,
-.cmd_palette_item.selected {
+.cmd-palette-item:hover,
+.cmd-palette-item.selected {
   background-color: var(--bg2);
 }
 
-.cmd_palette_item.selected {
+.cmd-palette-item.selected {
   border-left-color: var(--active);
 }
 
-.cmd_palette_empty {
+.cmd-palette-empty {
   padding: 16px;
   text-align: center;
   color: var(--grey);
@@ -1031,7 +1032,7 @@ ui-command-palette[open] {
   font-size: 12px;
 }
 
-.cmd_palette_item_shortcut {
+.cmd-palette-item-shortcut {
   font-family: var(--font-family-mono);
   opacity: 0.8;
   background: var(--btn-bg);
@@ -1041,7 +1042,7 @@ ui-command-palette[open] {
   border-radius: 4px;
 }
 
-.cmd_palette_footer {
+.cmd-palette-footer {
   display: flex;
   justify-content: space-around;
   padding: 8px 16px;
@@ -1050,7 +1051,7 @@ ui-command-palette[open] {
   background-color: var(--fh-bg);
 }
 
-.cmd_palette_footer kbd {
+.cmd-palette-footer kbd {
   font-family: var(--font-family-mono);
   background: var(--btn-bg);
   border: 1px solid var(--btn-border);
