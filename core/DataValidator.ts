@@ -1,6 +1,6 @@
 /**
  * @file core/DataValidator.ts
- * Unified tabular data, header, and calendar date validator with declarative cell transforms.
+ * Unified tabular data, header, and calendar date validator with declarative rule registry.
  * ZERO browser/DOM imports.
  */
 
@@ -19,6 +19,38 @@ export interface ValidationRunResult {
   readonly reason?: 'coexistence' | 'ambiguous' | 'no_dates';
 }
 
+export interface ValidationRule {
+  readonly id: string;
+  readonly cmdId: string;
+  readonly label: string;
+  readonly cmdLabel: string;
+  readonly description: string;
+  readonly icon: string;
+  readonly key?: string;
+  readonly ctrl?: boolean;
+  readonly shift?: boolean;
+  readonly transform?: (val: string) => string;
+}
+
+const isNum = (s: string) => Number.isFinite(Number(s));
+
+export const VALIDATION_RULES: readonly ValidationRule[] = [
+  { id: 'headers', cmdId: 'validateHeaders', label: 'Headers & SQL Compliance', cmdLabel: 'Validate: Headers & SQL Compliance', description: 'Sanitize column headers for SQL identifier standards and duplicates', icon: 'validate_headers', key: 'H', ctrl: true, shift: true },
+  { id: 'dates', cmdId: 'validateDates', label: 'Date Formats (YYYY-MM-DD)', cmdLabel: 'Validate: Date Formats (YYYY-MM-DD)', description: 'Standardize date formats across columns to YYYY-mm-dd', icon: 'date_checker' },
+  { id: 'trim_whitespace', cmdId: 'validateWhitespace', label: 'Trim Whitespace', cmdLabel: 'Validate: Trim Whitespace', description: 'Remove leading and trailing whitespace from cell text', icon: 'trim', transform: val => val.trim() },
+  { id: 'comma_decimals', cmdId: 'validateCommaDecimals', label: 'Decimal Comma -> Dot', cmdLabel: 'Validate: Decimal Comma -> Dot', description: 'Convert comma decimals (3,14) to dot notation in numeric fields', icon: 'decimal', transform: val => {
+    if (val.includes(',') && !isNum(val)) {
+      const candidate = val.replace(',', '.');
+      if (isNum(candidate)) return candidate;
+    }
+    return val;
+  } },
+  { id: 'line_returns', cmdId: 'validateLineReturns', label: 'Line Returns -> Pipe', cmdLabel: 'Validate: Line Returns -> Pipe', description: 'Replace embedded newline line breaks with pipe character (|)', icon: 'replace', transform: val => (!isNum(val) && val.includes('\n')) ? val.replaceAll('\n', '|') : val },
+  { id: 'double_quotes', cmdId: 'validateQuotes', label: 'Double Quotes -> Single', cmdLabel: 'Validate: Double Quotes -> Single', description: 'Replace double quotation marks (") with single quotes (\')', icon: 'replace', transform: val => (!isNum(val) && val.includes('"')) ? val.replaceAll('"', "'") : val },
+  { id: 'text_commas', cmdId: 'validateTextCommas', label: 'Text Commas -> Dash', cmdLabel: 'Validate: Text Commas -> Dash', description: 'Replace commas inside text cells with hyphens (-)', icon: 'replace', transform: val => (!isNum(val) && val.includes(',')) ? val.replaceAll(',', '-') : val },
+  { id: 'lowercase', cmdId: 'validateLowercase', label: 'Force Lowercase', cmdLabel: 'Validate: Force Lowercase', description: 'Convert all text cells to lowercase', icon: 'match_case', transform: val => !isNum(val) ? val.toLowerCase() : val },
+];
+
 export function isValidCalendarDate(year: number, month: number, day: number): boolean {
   if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1) return false;
   const isLeap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
@@ -27,7 +59,7 @@ export function isValidCalendarDate(year: number, month: number, day: number): b
 }
 
 export function parseDateCandidate(rawVal: unknown): { p1: number; p2: number; year: number; raw: string } | null {
-  if (rawVal === undefined || rawVal === null) return null;
+  if (rawVal == null) return null;
   const raw = String(rawVal).trim();
   const m = raw.match(/^(\d{1,2})[^0-9a-zA-Z]+(\d{1,2})[^0-9a-zA-Z]+(\d{4})$/);
   if (!m) return null;
@@ -39,7 +71,7 @@ export function parseDateCandidate(rawVal: unknown): { p1: number; p2: number; y
 }
 
 export function parseYearFirstDate(rawVal: unknown): { year: number; month: number; day: number; raw: string } | null {
-  if (rawVal === undefined || rawVal === null) return null;
+  if (rawVal == null) return null;
   const raw = String(rawVal).trim();
   const m = raw.match(/^(\d{4})[^0-9a-zA-Z]+(\d{1,2})[^0-9a-zA-Z]+(\d{1,2})$/);
   if (!m) return null;
@@ -48,23 +80,6 @@ export function parseYearFirstDate(rawVal: unknown): { year: number; month: numb
   return isValidCalendarDate(year, month, day) ? { year, month, day, raw } : null;
 }
 
-const isNum = (s: string) => Number.isFinite(Number(s));
-
-const CELL_TRANSFORMS: Record<string, (val: string) => string> = {
-  trim_whitespace: val => val.trim(),
-  comma_decimals: val => {
-    if (val.includes(',') && !isNum(val)) {
-      const candidate = val.replace(',', '.');
-      if (isNum(candidate)) return candidate;
-    }
-    return val;
-  },
-  line_returns: val => (!isNum(val) && val.includes('\n')) ? val.replaceAll('\n', '|') : val,
-  double_quotes: val => (!isNum(val) && val.includes('"')) ? val.replaceAll('"', "'") : val,
-  text_commas: val => (!isNum(val) && val.includes(',')) ? val.replaceAll(',', '-') : val,
-  lowercase: val => !isNum(val) ? val.toLowerCase() : val
-};
-
 const fmtIsoDate = (y: number, m: number, d: number) =>
   `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
@@ -72,8 +87,8 @@ export class DataValidator {
   static runRule(dataframe: Dataframe, ruleId: string): ValidationRunResult {
     if (ruleId === 'headers') return { proposals: this.validateHeaders(dataframe) };
     if (ruleId === 'dates') return this.validateDates(dataframe);
-    const transform = CELL_TRANSFORMS[ruleId];
-    return { proposals: transform ? this.scanCells(dataframe, transform) : [] };
+    const rule = VALIDATION_RULES.find(r => r.id === ruleId);
+    return { proposals: rule?.transform ? this.scanCells(dataframe, rule.transform) : [] };
   }
 
   static scanCells(dataframe: Dataframe, transform: (val: string) => string): ValidationProposal[] {
@@ -91,9 +106,7 @@ export class DataValidator {
         if (!raw) continue;
         const oldValue = String(raw);
         const newValue = transform(oldValue);
-        if (newValue !== oldValue) {
-          proposals.push({ x, y, oldValue, newValue, status: 'pending' });
-        }
+        if (newValue !== oldValue) proposals.push({ x, y, oldValue, newValue, status: 'pending' });
       }
     }
     return proposals;
@@ -110,9 +123,7 @@ export class DataValidator {
       let suffix = 1;
       while (seen.has(candidate)) candidate = `${base}_c${x + suffix++}`;
       seen.add(candidate);
-      if (candidate !== oldValue) {
-        proposals.push({ x, y: 0, oldValue, newValue: candidate, status: 'pending' });
-      }
+      if (candidate !== oldValue) proposals.push({ x, y: 0, oldValue, newValue: candidate, status: 'pending' });
     }
     return proposals;
   }
@@ -147,9 +158,7 @@ export class DataValidator {
       }
     }
 
-    if (yfList.length === 0 && ylList.length === 0) {
-      return { proposals: [], reason: 'no_dates' };
-    }
+    if (yfList.length === 0 && ylList.length === 0) return { proposals: [], reason: 'no_dates' };
 
     const proposals: ValidationProposal[] = [];
     for (const c of yfList) {

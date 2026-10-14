@@ -4,29 +4,17 @@
  */
 
 import { getSheet } from './state.js';
-import { setIcon, escapeHtml } from './icons.js';
+import { BaseElement, defineEl, hydrateIcons, setOpen, escapeHtml } from './icons.js';
 import { Notification } from './Notification.js';
-import { DataValidator } from '../../core/DataValidator.js';
+import { DataValidator, VALIDATION_RULES } from '../../core/DataValidator.js';
 
-export const VALIDATION_RULES = [
-  { id: 'headers', label: 'Headers & SQL Compliance', description: 'Sanitize column headers for SQL identifier standards and duplicates', icon: 'validate_headers' },
-  { id: 'dates', label: 'Date Formats (YYYY-MM-DD)', description: 'Standardize date formats across columns to YYYY-mm-dd', icon: 'date_checker' },
-  { id: 'trim_whitespace', label: 'Trim Whitespace', description: 'Remove leading and trailing whitespace from cell text', icon: 'trim' },
-  { id: 'comma_decimals', label: 'Decimal Comma -> Dot', description: 'Convert comma decimals (3,14) to dot notation in numeric fields', icon: 'decimal' },
-  { id: 'line_returns', label: 'Line Returns -> Pipe', description: 'Replace embedded newline line breaks with pipe character (|)', icon: 'replace' },
-  { id: 'double_quotes', label: 'Double Quotes -> Single', description: 'Replace double quotation marks (") with single quotes (\')', icon: 'replace' },
-  { id: 'text_commas', label: 'Text Commas -> Dash', description: 'Replace commas inside text cells with hyphens (-)', icon: 'replace' },
-  { id: 'lowercase', label: 'Force Lowercase', description: 'Convert all text cells to lowercase', icon: 'match_case' },
-];
+export { VALIDATION_RULES };
 
 const ITEM_HEIGHT = 44;
-const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
 export class ValidationPane extends BaseElement {
   static getInstance() {
-    return typeof document !== 'undefined'
-      ? (document.getElementById('validation-pane') || document.querySelector('ui-validation-pane'))
-      : null;
+    return globalThis.document?.getElementById?.('validation-pane') || globalThis.document?.querySelector?.('ui-validation-pane') || null;
   }
 
   static toggle() {
@@ -51,7 +39,6 @@ export class ValidationPane extends BaseElement {
     this.view = 'rules';
     this.selectedItem = null;
     this._initialized = false;
-    this._lastTxTimestamp = 0;
   }
 
   connectedCallback() { this.init(); }
@@ -106,56 +93,49 @@ export class ValidationPane extends BaseElement {
     this.virtualSpacer = this.querySelector('#validation-virtual-spacer');
     this.virtualContent = this.querySelector('#validation-virtual-content');
 
-    this.applyIcons(this);
+    hydrateIcons(this);
 
     this.backBtn?.addEventListener('click', () => this.handleBack());
-    this.acceptAllBtn?.addEventListener('click', () => this.handleAcceptAll());
-    this.rejectAllBtn?.addEventListener('click', () => this.handleRejectAll());
+    this.acceptAllBtn?.addEventListener('click', () => this.resolveScope(true));
+    this.rejectAllBtn?.addEventListener('click', () => this.resolveScope(false));
     this.closeBtn?.addEventListener('click', () => this.close());
     this.contentContainer?.addEventListener('scroll', () => {
       if (this.view === 'detail') this.renderVirtualWindow();
     }, { passive: true });
 
-    this.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.handleBack();
-      }
+    this.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.handleBack(); }
     });
 
-    this.rulesView?.addEventListener('click', (event) => {
-      const ruleId = event.target.closest('.validation-rule-card')?.dataset.ruleId;
+    this.rulesView?.addEventListener('click', (e) => {
+      const ruleId = e.target.closest('.validation-rule-card')?.dataset.ruleId;
       if (ruleId) this.runRule(ruleId);
     });
 
-    this.columnsView?.addEventListener('click', (event) => {
-      const button = event.target.closest('.validation-btn');
-      if (button) {
-        event.stopPropagation();
-        const col = parseInt(button.dataset.col, 10);
+    this.columnsView?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.validation-btn');
+      if (btn) {
+        e.stopPropagation();
+        const col = parseInt(btn.dataset.col, 10);
         if (!Number.isNaN(col)) {
-          if (button.classList.contains('col-accept-btn')) this.resolveItems(this.getPendingItems(col), true);
-          else if (button.classList.contains('col-reject-btn')) this.resolveItems(this.getPendingItems(col), false);
-          else if (button.classList.contains('col-inspect-btn')) this.showDetail(col);
+          if (btn.classList.contains('col-inspect-btn')) this.showDetail(col);
+          else this.resolveItems(this.getPendingItems(col), btn.classList.contains('col-accept-btn'));
         }
         return;
       }
-      const card = event.target.closest('.validation-col-card');
+      const card = e.target.closest('.validation-col-card');
       if (card) this.showDetail(parseInt(card.dataset.col, 10));
     });
 
-    this.virtualContent?.addEventListener('click', (event) => {
-      const card = event.target.closest('.validation-item');
-      if (!card) return;
-      const item = this.colItems[parseInt(card.dataset.idx, 10)];
+    this.virtualContent?.addEventListener('click', (e) => {
+      const card = e.target.closest('.validation-item');
+      const item = card ? this.colItems[parseInt(card.dataset.idx, 10)] : null;
       if (!item) return;
 
-      const button = event.target.closest('.validation-btn');
-      if (button) {
-        event.stopPropagation();
-        if (button.classList.contains('item-accept-btn')) this.resolveItems([item], true);
-        else if (button.classList.contains('item-reject-btn')) this.resolveItems([item], false);
+      const btn = e.target.closest('.validation-btn');
+      if (btn) {
+        e.stopPropagation();
+        this.resolveItems([item], btn.classList.contains('item-accept-btn'));
         return;
       }
       this.handleItemClick(item, card);
@@ -164,14 +144,8 @@ export class ValidationPane extends BaseElement {
     this.showRules();
   }
 
-  applyIcons(container = this) {
-    if (!container) return;
-    for (const el of container.querySelectorAll('[data-icon]')) setIcon(el, el.dataset.icon);
-  }
-
   getColHeader(colIndex) {
-    const df = getSheet()?.df;
-    return (df ? df.get(colIndex, 0) : '') || `col_${colIndex + 1}`;
+    return getSheet()?.df?.get(colIndex, 0) || `col_${colIndex + 1}`;
   }
 
   getPendingItems(colIndex = null) {
@@ -195,10 +169,7 @@ export class ValidationPane extends BaseElement {
 
   show() {
     this.init();
-    this.classList.add('open');
-    this.setAttribute('open', '');
-    this.removeAttribute('hidden');
-    this.style.display = 'flex';
+    setOpen(this, true, 'flex');
   }
 
   toggle() {
@@ -213,21 +184,14 @@ export class ValidationPane extends BaseElement {
 
   close() {
     this.init();
-    this.classList.remove('open');
-    this.removeAttribute('open');
-    this.setAttribute('hidden', '');
-    this.style.display = 'none';
+    setOpen(this, false);
   }
 
   runRule(ruleId) {
     this.init();
     const sheet = getSheet();
     if (!sheet?.df) return;
-
-    if (sheet.df.lock) {
-      Notification.warning('File is in View-Only mode. Edits are disabled.', 'Validation');
-      return;
-    }
+    if (sheet.df.lock) return Notification.warning('File is in View-Only mode. Edits are disabled.', 'Validation');
 
     const rule = VALIDATION_RULES.find(r => r.id === ruleId);
     if (!rule) return;
@@ -239,7 +203,7 @@ export class ValidationPane extends BaseElement {
       Notification.warning('Cannot determine date format with certainty: no date has a digit over 12.', 'Date Validation');
     }
 
-    if (!proposals || proposals.length === 0) {
+    if (!proposals?.length) {
       Notification.success(`No issues found for ${rule.label}.`, 'Validation');
       if (this.view !== 'rules') this.showRules();
       return;
@@ -257,21 +221,9 @@ export class ValidationPane extends BaseElement {
     else this.close();
   }
 
-  handleAcceptAll() {
-    if (this.view === 'columns') {
-      const pending = this.getPendingItems();
-      if (pending.length > 0) this.resolveItems(pending, true);
-    } else if (this.view === 'detail' && this.currentCol !== null) {
-      this.resolveItems(this.getPendingItems(this.currentCol), true);
-    }
-  }
-
-  handleRejectAll() {
-    if (this.view === 'columns') {
-      this.resolveItems(this.getPendingItems(), false);
-    } else if (this.view === 'detail' && this.currentCol !== null) {
-      this.resolveItems(this.getPendingItems(this.currentCol), false);
-    }
+  resolveScope(accept) {
+    if (this.view === 'columns') this.resolveItems(this.getPendingItems(), accept);
+    else if (this.view === 'detail' && this.currentCol !== null) this.resolveItems(this.getPendingItems(this.currentCol), accept);
   }
 
   setView(mode, title, count = 0, scopeLabel = '') {
@@ -283,20 +235,13 @@ export class ValidationPane extends BaseElement {
       this.countBadge.textContent = count;
       this.countBadge.style.display = isRoot ? 'none' : 'inline-block';
     }
-    if (this.acceptAllBtn) {
-      this.acceptAllBtn.style.display = isRoot ? 'none' : 'inline-flex';
+    for (const [btn, verb] of [[this.acceptAllBtn, 'Accept'], [this.rejectAllBtn, 'Reject']]) {
+      if (!btn) continue;
+      btn.style.display = isRoot ? 'none' : 'inline-flex';
       if (scopeLabel) {
-        const label = `Accept all corrections ${scopeLabel}`;
-        this.acceptAllBtn.title = label;
-        this.acceptAllBtn.setAttribute('aria-label', label);
-      }
-    }
-    if (this.rejectAllBtn) {
-      this.rejectAllBtn.style.display = isRoot ? 'none' : 'inline-flex';
-      if (scopeLabel) {
-        const label = `Reject all corrections ${scopeLabel}`;
-        this.rejectAllBtn.title = label;
-        this.rejectAllBtn.setAttribute('aria-label', label);
+        const label = `${verb} all corrections ${scopeLabel}`;
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
       }
     }
     if (this.rulesView) this.rulesView.style.display = mode === 'rules' ? 'flex' : 'none';
@@ -306,9 +251,7 @@ export class ValidationPane extends BaseElement {
 
   showRules() {
     this.init();
-    this.currentRule = null;
-    this.currentCol = null;
-    this.selectedItem = null;
+    this.currentRule = this.currentCol = this.selectedItem = null;
     this.setView('rules', 'Validation');
     if (!this.rulesView) return;
 
@@ -322,13 +265,12 @@ export class ValidationPane extends BaseElement {
         <button class="icon validation-rule-nav" type="button" tabindex="-1" aria-hidden="true" data-icon="arrow_right"></button>
       </div>
     `).join('');
-    this.applyIcons(this.rulesView);
+    hydrateIcons(this.rulesView);
   }
 
   showColumns() {
     this.init();
-    this.currentCol = null;
-    this.selectedItem = null;
+    this.currentCol = this.selectedItem = null;
     const pending = this.getPendingItems();
     if (pending.length === 0) return this.showRules();
 
@@ -342,20 +284,20 @@ export class ValidationPane extends BaseElement {
     if (groups.length === 0) return this.showRules();
 
     if (this.countBadge) this.countBadge.textContent = this.getPendingItems().length;
-    this.columnsView.innerHTML = groups.map(group => `
-      <div class="validation-col-card" data-col="${group.x}">
+    this.columnsView.innerHTML = groups.map(g => `
+      <div class="validation-col-card" data-col="${g.x}">
         <div class="validation-col-info">
-          <span class="validation-col-label">Col ${group.x + 1}: ${escapeHtml(group.header)}</span>
-          <span class="validation-col-count">${group.items.length}</span>
+          <span class="validation-col-label">Col ${g.x + 1}: ${escapeHtml(g.header)}</span>
+          <span class="validation-col-count">${g.items.length}</span>
         </div>
         <div class="validation-col-actions">
-          <button class="icon validation-btn col-accept-btn" type="button" title="Accept column ${group.x + 1}" aria-label="Accept column ${group.x + 1}" data-icon="on" data-col="${group.x}"></button>
-          <button class="icon validation-btn col-reject-btn" type="button" title="Reject column ${group.x + 1}" aria-label="Reject column ${group.x + 1}" data-icon="off" data-col="${group.x}"></button>
-          <button class="icon validation-btn col-inspect-btn" type="button" title="Inspect individual corrections" aria-label="Inspect individual corrections" data-icon="arrow_right" data-col="${group.x}"></button>
+          <button class="icon validation-btn col-accept-btn" type="button" title="Accept column ${g.x + 1}" aria-label="Accept column ${g.x + 1}" data-icon="on" data-col="${g.x}"></button>
+          <button class="icon validation-btn col-reject-btn" type="button" title="Reject column ${g.x + 1}" aria-label="Reject column ${g.x + 1}" data-icon="off" data-col="${g.x}"></button>
+          <button class="icon validation-btn col-inspect-btn" type="button" title="Inspect individual corrections" aria-label="Inspect individual corrections" data-icon="arrow_right" data-col="${g.x}"></button>
         </div>
       </div>
     `).join('');
-    this.applyIcons(this.columnsView);
+    hydrateIcons(this.columnsView);
   }
 
   showDetail(colIndex) {
@@ -375,44 +317,28 @@ export class ValidationPane extends BaseElement {
 
     if (this.countBadge) this.countBadge.textContent = this.colItems.length;
     if (this.virtualSpacer) this.virtualSpacer.style.height = `${this.colItems.length * ITEM_HEIGHT}px`;
-    this._lastRenderStart = -1;
-    this._lastRenderEnd = -1;
+    this._lastRenderStart = this._lastRenderEnd = -1;
     this.renderVirtualWindow();
   }
 
   resolveItems(itemsList, accept) {
-    if (!itemsList || itemsList.length === 0) return;
+    if (!itemsList?.length) return;
     if (accept) {
       const sheet = getSheet();
       if (sheet?.df) {
-        if (sheet.df.lock) {
-          Notification.warning('File is in View-Only mode. Edits are disabled.', 'Validation');
-          return;
-        }
-        const changes = itemsList.map(item => ({
-          x: item.x,
-          y: item.y,
-          oldValue: item.oldValue,
-          newValue: item.newValue
-        }));
-        const txTimestamp = Math.max(Date.now(), (this._lastTxTimestamp || 0) + 105);
-        this._lastTxTimestamp = txTimestamp;
-        sheet.df.create({ type: 'RANGE_EDIT', timestamp: txTimestamp, payload: { changes } });
+        if (sheet.df.lock) return Notification.warning('File is in View-Only mode. Edits are disabled.', 'Validation');
+        sheet.df.applyChanges(itemsList.map(({ x, y, oldValue, newValue }) => ({ x, y, oldValue, newValue })));
+        sheet.reload?.();
+        sheet.refreshSelection?.(true);
       }
       for (const item of itemsList) item.status = 'accepted';
-      const activeSheet = getSheet();
-      if (activeSheet) {
-        activeSheet.reload?.();
-        activeSheet.refreshSelection?.(true);
-      }
     } else {
       for (const item of itemsList) item.status = 'rejected';
     }
 
     if (this.getPendingItems().length === 0) {
       Notification.success('All corrections resolved.', 'Validation');
-      this.showRules();
-      return;
+      return this.showRules();
     }
     if (this.view === 'detail') {
       if (this.getPendingItems(this.currentCol).length === 0) this.showColumns();
@@ -439,9 +365,7 @@ export class ValidationPane extends BaseElement {
     const renderEnd = Math.min(total, endIndex + 5);
 
     this.virtualContent.style.transform = `translateY(${renderStart * ITEM_HEIGHT}px)`;
-    if (this._lastRenderStart === renderStart && this._lastRenderEnd === renderEnd && this._lastSelected === this.selectedItem) {
-      return;
-    }
+    if (this._lastRenderStart === renderStart && this._lastRenderEnd === renderEnd && this._lastSelected === this.selectedItem) return;
     this._lastRenderStart = renderStart;
     this._lastRenderEnd = renderEnd;
     this._lastSelected = this.selectedItem;
@@ -464,7 +388,7 @@ export class ValidationPane extends BaseElement {
       `;
     }
     this.virtualContent.innerHTML = html;
-    this.applyIcons(this.virtualContent);
+    hydrateIcons(this.virtualContent);
   }
 
   handleItemClick(item, cardEl) {
@@ -478,12 +402,9 @@ export class ValidationPane extends BaseElement {
   }
 
   formatValue(value) {
-    if (value === undefined || value === null || value === '') return '<em>empty</em>';
-    const escaped = escapeHtml(value);
-    return escaped.includes('\n') ? escaped.replace(/\n/g, '\\n') : escaped;
+    if (!value) return '<em>empty</em>';
+    return escapeHtml(value).replaceAll('\n', '\\n');
   }
 }
 
-if (typeof customElements !== 'undefined' && !customElements.get('ui-validation-pane')) {
-  customElements.define('ui-validation-pane', ValidationPane);
-}
+defineEl('ui-validation-pane', ValidationPane);

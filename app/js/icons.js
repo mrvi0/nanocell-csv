@@ -1,39 +1,26 @@
+export const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
+
+export function defineEl(tag, cls) {
+  if (typeof customElements !== 'undefined' && !customElements.get(tag)) {
+    customElements.define(tag, cls);
+  }
+}
+
 let iconModules = {};
 try {
-  iconModules = import.meta.glob('../icons/*.svg', {
-    eager: true,
-    import: 'default'
-  });
+  iconModules = import.meta.glob('../icons/*.svg', { eager: true, import: 'default' });
 } catch {}
 
-const iconMap = new Map();
-
+export const iconMap = new Map();
 for (const [path, url] of Object.entries(iconModules)) {
   const filename = path.replace(/^\.\.\/icons\//, '');
-  const iconName = filename.replace(/\.svg$/, '');
   iconMap.set(filename, url);
-  iconMap.set(iconName, url);
-}
-
-if (iconMap.has('on')) {
-  iconMap.set('check', iconMap.get('on'));
-  iconMap.set('accept', iconMap.get('on'));
-}
-if (iconMap.has('off')) {
-  iconMap.set('cross', iconMap.get('off'));
-  iconMap.set('reject', iconMap.get('off'));
-  iconMap.set('close', iconMap.get('off'));
+  iconMap.set(filename.replace(/\.svg$/, ''), url);
 }
 
 export function getIconUrl(iconName) {
   if (!iconName) return '';
-  let normalized = iconName.trim().replace(/^url\(["']?|["']?\)$/g, '');
-  if (iconMap.has(normalized)) return iconMap.get(normalized);
-  normalized = normalized.replace(/^\/?(app\/)?(icons\/)?/, '');
-  if (iconMap.has(normalized)) return iconMap.get(normalized);
-  const withoutExt = normalized.replace(/\.svg$/, '');
-  if (iconMap.has(withoutExt)) return iconMap.get(withoutExt);
-  return iconMap.get(iconName) || iconName;
+  return iconMap.get(iconName) || iconMap.get(iconName.replace(/\.svg$/, '')) || iconName;
 }
 
 export function setIcon(element, iconName) {
@@ -42,6 +29,26 @@ export function setIcon(element, iconName) {
   if (url) {
     element.style.setProperty('--icon-url', `url("${url}")`);
     if (element.dataset) element.dataset.icon = iconName;
+  }
+}
+
+export function hydrateIcons(root) {
+  if (!root?.querySelectorAll) return;
+  for (const el of root.querySelectorAll('[data-icon]')) setIcon(el, el.dataset.icon);
+}
+
+export function setOpen(el, open, display = 'block') {
+  if (!el) return;
+  el.classList?.toggle('open', open);
+  el.classList?.toggle('visible', open);
+  if (open) {
+    el.setAttribute?.('open', '');
+    el.removeAttribute?.('hidden');
+    if (el.style) el.style.display = display;
+  } else {
+    el.removeAttribute?.('open');
+    el.setAttribute?.('hidden', '');
+    if (el.style) el.style.display = 'none';
   }
 }
 
@@ -55,5 +62,3 @@ export function escapeHtml(text) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
-
-export { iconMap };

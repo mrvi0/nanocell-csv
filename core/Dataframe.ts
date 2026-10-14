@@ -1,8 +1,8 @@
 /**
  * @file core/Dataframe.ts
  * Authoritative 2D tabular data store directly managing string[][] cell memory.
- * Incorporates cell/range utilities, transactional history, search/replace, sort/filter,
- * and undo/redo stacks with zero browser/DOM dependencies.
+ * Incorporates cell/range utilities, transactional closure history, search/replace,
+ * sort/filter, and undo/redo stacks with zero browser/DOM dependencies.
  */
 
 export interface CellCoordinate {
@@ -25,10 +25,9 @@ export interface SortOptions {
   numbersFirst?: boolean;
 }
 
-export interface CommandDescriptor {
-  type: string;
-  timestamp?: number;
-  payload?: any;
+export interface UndoEntry {
+  apply(): void;
+  revert(): void;
 }
 
 export interface CellChange {
@@ -98,10 +97,9 @@ function padRow(row: string[], width: number): void {
 }
 
 function expandSeries(v0: string, v1: string, count: number, hasV1: boolean): string[] {
-  const isNum0 = v0 !== '' && isNumeric(v0);
-  const isNum1 = hasV1 && v1 !== '' && isNumeric(v1);
-  if (isNum0) {
+  if (v0 !== '' && isNumeric(v0)) {
     const num0 = Number(v0);
+    const isNum1 = hasV1 && v1 !== '' && isNumeric(v1);
     const step = isNum1 ? Number(v1) - num0 : 1;
     const dec0 = (v0.split('.')[1] || '').length;
     const decimals = isNum1 ? Math.max(dec0, (v1.split('.')[1] || '').length) : dec0;
@@ -110,7 +108,7 @@ function expandSeries(v0: string, v1: string, count: number, hasV1: boolean): st
       return decimals > 0 ? String(Number(val.toFixed(decimals))) : String(val);
     });
   }
-  return Array.from({ length: count }, () => v0);
+  return new Array<string>(count).fill(v0);
 }
 
 function buildSearchRegex(query: SearchQuery): RegExp | null {
@@ -128,15 +126,13 @@ function buildSearchRegex(query: SearchQuery): RegExp | null {
 }
 
 export class Dataframe {
-  public static readonly MS_DELTA = 100;
-
   protected _data: string[][];
   protected _isSaved = true;
   protected _isLocked = false;
 
-  public undoStack: CommandDescriptor[] = [];
-  public redoStack: CommandDescriptor[] = [];
-  private _txCommands: CommandDescriptor[] | null = null;
+  public undoStack: UndoEntry[] = [];
+  public redoStack: UndoEntry[] = [];
+  private _tx: UndoEntry[] | null = null;
 
   constructor(initialData?: CellValue[][]) {
     if (initialData && initialData.length > 0) {
@@ -162,24 +158,98 @@ export class Dataframe {
     return normalizeCellValue(this._data[y]?.[x]);
   }
 
-  private _applyChanges(changes: CellChange[], description?: string): void {
-    if (changes.length > 0) {
-      this.create({ type: 'RANGE_EDIT', timestamp: Date.now(), payload: { changes, description } });
+  record(apply: () => void, revert: () => void): void {
+    if (this.lock) return;
+    apply();
+    this.markDirty();
+    const entry: UndoEntry = {
+      apply: () => { apply(); this.markDirty(); },
+      revert: () => { revert(); this.markDirty(); }
+    };
+    if (this._tx) {
+      this._tx.push(entry);
+    } else {
+      this.undoStack.push(entry);
+      this.redoStack = [];
     }
   }
 
-  editRange(range: CellRange, value: CellValue): void {
+  runTransaction<T>(description: string, fn: () => T): T {
+    const prev = this._tx;
+    const cmds: UndoEntry[] = [];
+    this._tx = cmds;
+    try {
+      const res = fn();
+      this._tx = prev;
+      if (cmds.length > 0) {
+        if (prev) prev.push(...cmds);
+        else {
+          this.undoStack.push({
+            apply: () => { for (let i = 0; i < cmds.length; i++) cmds[i].apply(); },
+            revert: () => { for (let i = cmds.length - 1; i >= 0; i--) cmds[i].revert(); }
+          });
+          this.redoStack = [];
+          this.markDirty();
+        }
+      }
+      return res;
+    } catch (err) {
+      this._tx = prev;
+      for (let i = cmds.length - 1; i >= 0; i--) cmds[i].revert();
+      throw err;
+    }
+  }
+
+  undo(): void {
+    const entry = this.undoStack.pop();
+    if (!entry) return;
+    entry.revert();
+    this.redoStack.push(entry);
+  }
+
+  redo(): void {
+    const entry = this.redoStack.pop();
+    if (!entry) return;
+    entry.apply();
+    this.undoStack.push(entry);
+  }
+
+  applyChanges(changes: CellChange[]): void {
+    if (this.lock || changes.length === 0) return;
+    this.record(
+      () => {
+        for (let i = 0; i < changes.length; i++) {
+          const c = changes[i];
+          this.ensureCapacity(c.x, c.y);
+          this._data[c.y][c.x] = normalizeCellValue(c.newValue);
+        }
+      },
+      () => {
+        for (let i = changes.length - 1; i >= 0; i--) {
+          const c = changes[i];
+          this.ensureCapacity(c.x, c.y);
+          this._data[c.y][c.x] = normalizeCellValue(c.oldValue);
+        }
+      }
+    );
+  }
+
+  mutateRange(range: CellRange, fn: (val: string, x: number, y: number) => CellValue): void {
     if (this.lock) return;
     const { xmin, xmax, ymin, ymax } = orderRange(range);
-    const newValue = normalizeCellValue(value);
     const changes: CellChange[] = [];
     for (let y = ymin; y <= ymax; y++) {
       for (let x = xmin; x <= xmax; x++) {
         const oldValue = this.get(x, y);
+        const newValue = normalizeCellValue(fn(oldValue, x, y));
         if (oldValue !== newValue) changes.push({ x, y, oldValue, newValue });
       }
     }
-    this._applyChanges(changes, 'Range Edit');
+    this.applyChanges(changes);
+  }
+
+  editRange(range: CellRange, value: CellValue): void {
+    this.mutateRange(range, () => value);
   }
 
   pasteMatrix(startX: number, startY: number, matrix: CellValue[][]): void {
@@ -195,67 +265,54 @@ export class Dataframe {
         if (oldValue !== newValue) changes.push({ x, y, oldValue, newValue });
       }
     }
-    this._applyChanges(changes, 'Paste Matrix');
+    this.applyChanges(changes);
   }
 
   fillSeries(range: CellRange): void {
     if (this.lock) return;
     const { xmin, xmax, ymin, ymax } = orderRange(range);
-    const changes: CellChange[] = [];
-
     if (ymin === ymax) {
-      const count = xmax - xmin + 1;
-      const vals = expandSeries(this.get(xmin, ymin), this.get(xmin + 1, ymin), count, xmin + 1 <= xmax);
-      for (let j = 0; j < count; j++) {
-        const x = xmin + j;
-        const oldValue = this.get(x, ymin);
-        if (oldValue !== vals[j]) changes.push({ x, y: ymin, oldValue, newValue: vals[j] });
-      }
+      const vals = expandSeries(this.get(xmin, ymin), this.get(xmin + 1, ymin), xmax - xmin + 1, xmin < xmax);
+      this.mutateRange(range, (_, x) => vals[x - xmin]);
     } else {
-      const count = ymax - ymin + 1;
-      for (let x = xmin; x <= xmax; x++) {
-        const vals = expandSeries(this.get(x, ymin), this.get(x, ymin + 1), count, ymin + 1 <= ymax);
-        for (let j = 0; j < count; j++) {
-          const y = ymin + j;
-          const oldValue = this.get(x, y);
-          if (oldValue !== vals[j]) changes.push({ x, y, oldValue, newValue: vals[j] });
-        }
-      }
+      const cols = Array.from({ length: xmax - xmin + 1 }, (_, i) =>
+        expandSeries(this.get(xmin + i, ymin), this.get(xmin + i, ymin + 1), ymax - ymin + 1, ymin < ymax)
+      );
+      this.mutateRange(range, (_, x, y) => cols[x - xmin][y - ymin]);
     }
-    this._applyChanges(changes, 'Expand Pattern');
   }
 
   roundRange(range: CellRange, integer = true): void {
-    if (this.lock) return;
-    const { xmin, xmax, ymin, ymax } = orderRange(range);
-    const changes: CellChange[] = [];
-    for (let y = ymin; y <= ymax; y++) {
-      for (let x = xmin; x <= xmax; x++) {
-        const oldValue = this.get(x, y);
-        if (oldValue !== '' && isNumeric(oldValue)) {
-          const newValue = integer ? String(Math.round(Number(oldValue))) : roundNumericString(oldValue, 2);
-          if (newValue !== oldValue) changes.push({ x, y, oldValue, newValue });
-        }
-      }
-    }
-    this._applyChanges(changes, 'Round Values');
+    this.mutateRange(range, (val) =>
+      (val !== '' && isNumeric(val))
+        ? (integer ? String(Math.round(Number(val))) : roundNumericString(val, 2))
+        : val
+    );
   }
 
   insertRow(index: number, rowData?: CellValue[]): void {
     if (this.lock || index < 0 || index > this.height) return;
-    const targetWidth = Math.max(1, this.width);
-    const newRow = new Array<string>(targetWidth).fill('');
-    if (rowData) {
-      const len = Math.min(rowData.length, targetWidth);
-      for (let i = 0; i < len; i++) newRow[i] = normalizeCellValue(rowData[i]);
-    }
-    this.create({ type: 'INSERT_ROW', timestamp: Date.now(), payload: { index, rowData: newRow } });
+    const w = Math.max(1, this.width);
+    const row = Array.from({ length: w }, (_, i) => (rowData && i < rowData.length) ? normalizeCellValue(rowData[i]) : '');
+    this.record(
+      () => { this._data.splice(index, 0, [...row]); },
+      () => { if (this.height > 1 && index < this.height) this._data.splice(index, 1); }
+    );
   }
 
   insertCol(index: number, colData?: CellValue[]): void {
     if (this.lock || index < 0 || index > this.width) return;
-    const normalized = colData ? colData.map(normalizeCellValue) : undefined;
-    this.create({ type: 'INSERT_COL', timestamp: Date.now(), payload: { index, colData: normalized } });
+    const col = colData?.map(normalizeCellValue);
+    this.record(
+      () => {
+        for (let y = 0; y < this.height; y++) this._data[y].splice(index, 0, col?.[y] ?? '');
+      },
+      () => {
+        if (this.width > 1 && index < this.width) {
+          for (let y = 0; y < this.height; y++) this._data[y].splice(index, 1);
+        }
+      }
+    );
   }
 
   deleteRows(startIndex: number, count = 1): string[][] {
@@ -263,7 +320,10 @@ export class Dataframe {
     const actualCount = Math.min(count, this.height - startIndex);
     if (this.height - actualCount < 1) return [];
     const rowsData = this._data.slice(startIndex, startIndex + actualCount).map(r => [...r]);
-    this.create({ type: 'BATCH_DELETE_ROWS', timestamp: Date.now(), payload: { index: startIndex, rowsData } });
+    this.record(
+      () => { this._data.splice(startIndex, rowsData.length); },
+      () => { this._data.splice(startIndex, 0, ...rowsData.map(r => [...r])); }
+    );
     return rowsData;
   }
 
@@ -271,51 +331,58 @@ export class Dataframe {
     if (this.lock || startIndex < 0 || startIndex >= this.width || count <= 0) return [];
     const actualCount = Math.min(count, this.width - startIndex);
     if (this.width - actualCount < 1) return [];
-    const colsData: string[][] = [];
-    for (let c = 0; c < actualCount; c++) {
-      const colIdx = startIndex + c;
-      colsData.push(this._data.map(row => row[colIdx]));
-    }
-    this.create({ type: 'BATCH_DELETE_COLS', timestamp: Date.now(), payload: { index: startIndex, colsData } });
+    const colsData = Array.from({ length: actualCount }, (_, c) => this._data.map(row => row[startIndex + c]));
+    this.record(
+      () => { for (let y = 0; y < this.height; y++) this._data[y].splice(startIndex, actualCount); },
+      () => {
+        for (let y = 0; y < this.height; y++) {
+          this._data[y].splice(startIndex, 0, ...colsData.map(col => col[y] ?? ''));
+        }
+      }
+    );
     return colsData;
   }
 
-  shiftRows(startIndex: number, count = 1, direction: 'up' | 'down' = 'down'): boolean {
-    if (this.lock || count <= 0 || startIndex < 0) return false;
-    if (direction === 'up') {
-      if (startIndex <= 0 || startIndex + count > this.height) return false;
-      this.create({ type: 'SHIFT_ROWS', timestamp: Date.now(), payload: { from: startIndex - 1, to: startIndex + count - 1 } });
-      return true;
-    }
-    if (startIndex + count > this.height) return false;
-    if (startIndex + count === this.height) {
-      if (count === 1) { this.insertRow(startIndex); return true; }
+  private _resolveShift(start: number, count: number, limit: number, backward: boolean, onAppend: () => void): [number, number] | boolean {
+    if (this.lock || count <= 0 || start < 0 || start + count > limit) return false;
+    if (backward) return start > 0 ? [start - 1, start + count - 1] : false;
+    if (start + count === limit) {
+      if (count === 1) { onAppend(); return true; }
       return false;
     }
-    this.create({ type: 'SHIFT_ROWS', timestamp: Date.now(), payload: { from: startIndex + count, to: startIndex } });
+    return [start + count, start];
+  }
+
+  shiftRows(startIndex: number, count = 1, direction: 'up' | 'down' = 'down'): boolean {
+    const res = this._resolveShift(startIndex, count, this.height, direction === 'up', () => this.insertRow(startIndex));
+    if (typeof res === 'boolean') return res;
+    const [from, to] = res;
+    const move = (src: number, dst: number) => {
+      const [row] = this._data.splice(src, 1);
+      if (row) this._data.splice(dst, 0, row);
+    };
+    this.record(() => move(from, to), () => move(to, from));
     return true;
   }
 
   shiftCols(startIndex: number, count = 1, direction: 'left' | 'right' = 'right'): boolean {
-    if (this.lock || count <= 0 || startIndex < 0) return false;
-    if (direction === 'left') {
-      if (startIndex <= 0 || startIndex + count > this.width) return false;
-      this.create({ type: 'SHIFT_COLS', timestamp: Date.now(), payload: { from: startIndex - 1, to: startIndex + count - 1 } });
-      return true;
-    }
-    if (startIndex + count > this.width) return false;
-    if (startIndex + count === this.width) {
-      if (count === 1) { this.insertCol(startIndex); return true; }
-      return false;
-    }
-    this.create({ type: 'SHIFT_COLS', timestamp: Date.now(), payload: { from: startIndex + count, to: startIndex } });
+    const res = this._resolveShift(startIndex, count, this.width, direction === 'left', () => this.insertCol(startIndex));
+    if (typeof res === 'boolean') return res;
+    const [from, to] = res;
+    const move = (src: number, dst: number) => {
+      for (let y = 0; y < this.height; y++) {
+        const [col] = this._data[y].splice(src, 1);
+        this._data[y].splice(dst, 0, col ?? '');
+      }
+    };
+    this.record(() => move(from, to), () => move(to, from));
     return true;
   }
 
   sort(n: number, options?: SortOptions): number[] {
     if (this.lock || n < 0 || n >= this.width) return [];
     const hasHeader = options?.hasHeader ?? false;
-    const ascending = options?.ascending ?? true;
+    const dir = (options?.ascending ?? true) ? 1 : -1;
     const numbersFirst = options?.numbersFirst ?? false;
 
     const numbers: { val: number; idx: number }[] = [];
@@ -334,7 +401,6 @@ export class Dataframe {
       }
     }
 
-    const dir = ascending ? 1 : -1;
     numbers.sort((a, b) => (a.val - b.val) * dir);
     strings.sort((a, b) => a.val.localeCompare(b.val) * dir);
 
@@ -347,7 +413,11 @@ export class Dataframe {
 
     const oldOrder = new Array<number>(newOrder.length);
     for (let i = 0; i < newOrder.length; i++) oldOrder[newOrder[i]] = i;
-    this.create({ type: 'ORDER_ROWS', timestamp: Date.now(), payload: { newOrder, oldOrder } });
+
+    const reorder = (order: number[]) => {
+      if (order.length === this.height) this._data = order.map(idx => this._data[idx]);
+    };
+    this.record(() => reorder(newOrder), () => reorder(oldOrder));
     return newOrder;
   }
 
@@ -360,27 +430,21 @@ export class Dataframe {
   transpose(range?: CellRange): void {
     if (this.lock) return;
     if (!range) {
-      this.create({ type: 'TRANSPOSE', timestamp: Date.now() });
+      const toggle = () => { this._data = Dataframe.transpose2D(this._data); this.square(); };
+      this.record(toggle, toggle);
       return;
     }
-    const ordered = orderRange(range);
-    const transposedSlice = Dataframe.transpose2D(this.slice(ordered));
-    const changesMap = new Map<string, CellChange>();
-
-    for (let y = ordered.ymin; y <= ordered.ymax; y++) {
-      for (let x = ordered.xmin; x <= ordered.xmax; x++) {
-        changesMap.set(`${x}:${y}`, { x, y, oldValue: this.get(x, y), newValue: '' });
+    const r = orderRange(range);
+    const slice = Dataframe.transpose2D(this.slice(r));
+    const span = Math.max(r.xmax - r.xmin, r.ymax - r.ymin);
+    this.mutateRange(
+      { xmin: r.xmin, xmax: r.xmin + span, ymin: r.ymin, ymax: r.ymin + span },
+      (oldVal, x, y) => {
+        const ry = y - r.ymin, rx = x - r.xmin;
+        if (ry < slice.length && rx < slice[ry].length) return slice[ry][rx];
+        return (x <= r.xmax && y <= r.ymax) ? '' : oldVal;
       }
-    }
-    for (let r = 0; r < transposedSlice.length; r++) {
-      for (let c = 0; c < transposedSlice[r].length; c++) {
-        const tx = ordered.xmin + c, ty = ordered.ymin + r, key = `${tx}:${ty}`;
-        const existing = changesMap.get(key);
-        if (existing) existing.newValue = transposedSlice[r][c];
-        else changesMap.set(key, { x: tx, y: ty, oldValue: this.get(tx, ty), newValue: transposedSlice[r][c] });
-      }
-    }
-    this._applyChanges(Array.from(changesMap.values()), 'Transpose Range');
+    );
   }
 
   trimAll(): void {
@@ -393,198 +457,6 @@ export class Dataframe {
         if (this._data[y]?.every(val => !val?.trim())) this.deleteRows(y, 1);
       }
     });
-  }
-
-  executeCommand(command: CommandDescriptor, isRevert = false): void {
-    if (!command?.type) return;
-    const payload = command.payload || {};
-    switch (command.type) {
-      case 'INSERT_ROW': {
-        const { index, rowData } = payload;
-        if (isRevert) {
-          if (this.height > 1 && index >= 0 && index < this.height) this._data.splice(index, 1);
-        } else {
-          const targetWidth = Math.max(1, this.width);
-          const row = new Array<string>(targetWidth).fill('');
-          if (rowData) {
-            const len = Math.min(rowData.length, targetWidth);
-            for (let i = 0; i < len; i++) row[i] = rowData[i];
-          }
-          this._data.splice(index, 0, row);
-        }
-        this.markDirty();
-        break;
-      }
-      case 'BATCH_DELETE_ROWS': {
-        const { index, rowsData } = payload;
-        if (isRevert) {
-          for (let i = 0; i < rowsData.length; i++) this._data.splice(index + i, 0, [...rowsData[i]]);
-        } else {
-          this._data.splice(index, rowsData.length);
-        }
-        this.markDirty();
-        break;
-      }
-      case 'INSERT_COL': {
-        const { index, colData } = payload;
-        if (isRevert) {
-          if (this.width > 1 && index >= 0 && index < this.width) {
-            for (let y = 0; y < this.height; y++) this._data[y].splice(index, 1);
-          }
-        } else {
-          const isAppend = index === this.width;
-          for (let y = 0; y < this.height; y++) {
-            const val = colData && y < colData.length ? colData[y] : '';
-            if (isAppend) this._data[y].push(val);
-            else this._data[y].splice(index, 0, val);
-          }
-        }
-        this.markDirty();
-        break;
-      }
-      case 'BATCH_DELETE_COLS': {
-        const { index, colsData } = payload;
-        const count = colsData.length;
-        if (isRevert) {
-          for (let y = 0; y < this.height; y++) {
-            const items: string[] = [];
-            for (let c = 0; c < count; c++) items.push(colsData[c][y] ?? '');
-            this._data[y].splice(index, 0, ...items);
-          }
-        } else {
-          for (let y = 0; y < this.height; y++) this._data[y].splice(index, count);
-        }
-        this.markDirty();
-        break;
-      }
-      case 'SHIFT_ROWS': {
-        const src = isRevert ? payload.to : payload.from;
-        const dst = isRevert ? payload.from : payload.to;
-        const [row] = this._data.splice(src, 1);
-        if (row) {
-          this._data.splice(dst, 0, row);
-          this.markDirty();
-        }
-        break;
-      }
-      case 'SHIFT_COLS': {
-        const src = isRevert ? payload.to : payload.from;
-        const dst = isRevert ? payload.from : payload.to;
-        for (let y = 0; y < this.height; y++) {
-          const [col] = this._data[y].splice(src, 1);
-          this._data[y].splice(dst, 0, col ?? '');
-        }
-        this.markDirty();
-        break;
-      }
-      case 'ORDER_ROWS': {
-        const order = isRevert ? payload.oldOrder : payload.newOrder;
-        if (Array.isArray(order) && order.length === this.height) {
-          this._data = order.map((idx: number) => this._data[idx]);
-          this.markDirty();
-        }
-        break;
-      }
-      case 'RANGE_EDIT': {
-        const { changes } = payload;
-        if (Array.isArray(changes)) {
-          if (isRevert) {
-            for (let i = changes.length - 1; i >= 0; i--) {
-              const edit = changes[i];
-              this.ensureCapacity(edit.x, edit.y);
-              this._data[edit.y][edit.x] = normalizeCellValue(edit.oldValue);
-            }
-          } else {
-            for (let i = 0; i < changes.length; i++) {
-              const edit = changes[i];
-              this.ensureCapacity(edit.x, edit.y);
-              this._data[edit.y][edit.x] = normalizeCellValue(edit.newValue);
-            }
-          }
-          this.markDirty();
-        }
-        break;
-      }
-      case 'TRANSPOSE': {
-        this._data = Dataframe.transpose2D(this._data);
-        this.square();
-        this.markDirty();
-        break;
-      }
-      case 'TRANSACTION': {
-        const { commands } = payload;
-        if (Array.isArray(commands)) {
-          if (isRevert) {
-            for (let i = commands.length - 1; i >= 0; i--) this.executeCommand(commands[i], true);
-          } else {
-            for (let i = 0; i < commands.length; i++) this.executeCommand(commands[i], false);
-          }
-        }
-        break;
-      }
-    }
-  }
-
-  runTransaction<T>(description: string, fn: () => T): T {
-    const prev = this._txCommands;
-    const commands: CommandDescriptor[] = [];
-    this._txCommands = commands;
-    try {
-      const res = fn();
-      this._txCommands = prev;
-      if (commands.length > 0) {
-        if (prev) prev.push(...commands);
-        else {
-          this.undoStack.push({ type: 'TRANSACTION', timestamp: Date.now(), payload: { description, commands } });
-          this.redoStack = [];
-          this.isSaved = false;
-        }
-      }
-      return res;
-    } catch (err) {
-      this._txCommands = prev;
-      for (let i = commands.length - 1; i >= 0; i--) this.executeCommand(commands[i], true);
-      throw err;
-    }
-  }
-
-  create(cmd: CommandDescriptor): void {
-    if (this.lock || !cmd || typeof cmd !== 'object' || !cmd.type) return;
-    cmd.timestamp ??= Date.now();
-    this.executeCommand(cmd, false);
-    if (this._txCommands) {
-      this._txCommands.push(cmd);
-    } else {
-      this.undoStack.push(cmd);
-      this.redoStack = [];
-    }
-    this.isSaved = false;
-  }
-
-  undo(): void {
-    let prev: CommandDescriptor | undefined, action: CommandDescriptor | undefined;
-    do {
-      if (this.undoStack.length < 1) return;
-      action = this.undoStack.pop();
-      if (!action) return;
-      this.executeCommand(action, true);
-      this.redoStack.push(action);
-      prev = this.undoStack[this.undoStack.length - 1];
-    } while (prev && action && ((action.timestamp ?? 0) - (prev.timestamp ?? 0)) < Dataframe.MS_DELTA);
-    this.isSaved = false;
-  }
-
-  redo(): void {
-    let next: CommandDescriptor | undefined, action: CommandDescriptor | undefined;
-    do {
-      if (this.redoStack.length < 1) return;
-      action = this.redoStack.pop();
-      if (!action) return;
-      this.executeCommand(action, false);
-      this.undoStack.push(action);
-      next = this.redoStack[this.redoStack.length - 1];
-    } while (next && action && ((next.timestamp ?? 0) - (action.timestamp ?? 0)) < Dataframe.MS_DELTA);
-    this.isSaved = false;
   }
 
   appendRows(rows: CellValue[][], bypassLock = false): void {
@@ -644,16 +516,14 @@ export class Dataframe {
     if (startRow >= totalRows) return [];
 
     if (!query) {
-      const all: number[] = [];
-      for (let r = startRow; r < totalRows; r++) all.push(r);
-      return all;
+      return Array.from({ length: totalRows - startRow }, (_, i) => startRow + i);
     }
 
     const needle = caseSensitive ? String(query) : String(query).toLowerCase();
     const matches: number[] = [];
     for (let r = startRow; r < totalRows; r++) {
       const cellVal = this._data[r]?.[colIndex];
-      if (cellVal === undefined || cellVal === null) continue;
+      if (cellVal == null) continue;
       const strVal = caseSensitive ? String(cellVal) : String(cellVal).toLowerCase();
       if (strVal.includes(needle)) matches.push(r);
     }
@@ -706,7 +576,7 @@ export class Dataframe {
       const newValue = value.replace(regex, replacement);
       if (newValue !== value) changes.push({ x, y, oldValue: value, newValue });
     }
-    this._applyChanges(changes, `Replace all occurrences of '${query.term}' with '${replacement}'`);
+    this.applyChanges(changes);
     return changes.length;
   }
 

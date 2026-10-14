@@ -4,11 +4,9 @@
  */
 
 import { getSheet, getCsvHandle } from './state.js';
-import { setIcon } from './icons.js';
+import { BaseElement, defineEl, hydrateIcons, setOpen } from './icons.js';
 import { DialogManager, NumInput } from './Dialogs.js';
 import { Notification } from './Notification.js';
-
-const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
 class FloatingToolbar extends BaseElement {
   constructor(sheet, extraClass = '') {
@@ -30,28 +28,21 @@ class FloatingToolbar extends BaseElement {
   get isOpen() { return this.classList.contains('open') || this.hasAttribute('open'); }
 
   bindCaseToggle(button, onToggle) {
-    setIcon(button, 'match_case');
     button.addEventListener('click', () => {
       this.matchCase = !this.matchCase;
-      button.setAttribute('aria-pressed', this.matchCase ? 'true' : 'false');
+      button.setAttribute('aria-pressed', String(this.matchCase));
       button.classList.toggle('active', this.matchCase);
       onToggle();
     });
   }
 
   showOverlay() {
-    if (!this.parentNode && typeof document !== 'undefined') document.body.appendChild(this);
-    this.classList.add('visible', 'open');
-    this.setAttribute('open', '');
-    this.removeAttribute('hidden');
-    this.style.display = 'block';
+    if (!this.parentNode) globalThis.document?.body?.appendChild(this);
+    setOpen(this, true, 'block');
   }
 
   hideOverlay() {
-    this.classList.remove('visible', 'open');
-    this.removeAttribute('open');
-    this.setAttribute('hidden', '');
-    this.style.display = 'none';
+    setOpen(this, false);
   }
 }
 
@@ -66,16 +57,16 @@ export class FinderDialog extends FloatingToolbar {
 
     this.widget.innerHTML = `
       <div class="finder-row find-row">
-        <button class="finder-toggle-btn icon" type="button" title="Toggle Replace (Ctrl+Shift+F)" aria-label="Toggle Replace"></button>
+        <button class="finder-toggle-btn icon" type="button" title="Toggle Replace (Ctrl+Shift+F)" aria-label="Toggle Replace" data-icon="arrow_right"></button>
         <div class="finder-input-wrapper">
           <input type="text" class="finder-input find-input" placeholder="Find" aria-label="Find term" />
           <span class="finder-count-badge">No match</span>
         </div>
         <div class="finder-btn-group">
-          <button class="finder-action-icon-btn case-btn icon" type="button" title="Match Case (Alt+C)" aria-label="Match Case" aria-pressed="false"></button>
-          <button class="finder-action-icon-btn prev-btn icon" type="button" title="Previous Match (Shift+Enter)" aria-label="Previous Match"></button>
-          <button class="finder-action-icon-btn next-btn icon" type="button" title="Next Match (Enter)" aria-label="Next Match"></button>
-          <button class="finder-action-icon-btn close-btn icon" type="button" title="Close (Escape)" aria-label="Close"></button>
+          <button class="finder-action-icon-btn case-btn icon" type="button" title="Match Case (Alt+C)" aria-label="Match Case" aria-pressed="false" data-icon="match_case"></button>
+          <button class="finder-action-icon-btn prev-btn icon" type="button" title="Previous Match (Shift+Enter)" aria-label="Previous Match" data-icon="arrow_up"></button>
+          <button class="finder-action-icon-btn next-btn icon" type="button" title="Next Match (Enter)" aria-label="Next Match" data-icon="arrow_down"></button>
+          <button class="finder-action-icon-btn close-btn icon" type="button" title="Close (Escape)" aria-label="Close" data-icon="off"></button>
         </div>
       </div>
       <div class="finder-row replace-row hidden">
@@ -84,10 +75,11 @@ export class FinderDialog extends FloatingToolbar {
           <input type="text" class="finder-input replace-input" placeholder="Replace" aria-label="Replace term" />
         </div>
         <div class="finder-btn-group">
-          <button class="finder-action-icon-btn replace-all-btn icon" type="button" title="Replace All (Alt+A)" aria-label="Replace All"></button>
+          <button class="finder-action-icon-btn replace-all-btn icon" type="button" title="Replace All (Alt+A)" aria-label="Replace All" data-icon="find_replace"></button>
         </div>
       </div>
     `;
+    hydrateIcons(this.widget);
 
     this.findInput = this.widget.querySelector('.find-input');
     this.replaceInput = this.widget.querySelector('.replace-input');
@@ -100,22 +92,16 @@ export class FinderDialog extends FloatingToolbar {
     this.replaceRow = this.widget.querySelector('.replace-row');
     this.replaceBtn = this.widget.querySelector('.replace-all-btn');
 
-    setIcon(this.toggleBtn, 'arrow_right');
-    setIcon(this.prevBtn, 'arrow_up');
-    setIcon(this.nextBtn, 'arrow_down');
-    setIcon(this.closeBtn, 'off');
-    setIcon(this.replaceBtn, 'find_replace');
-
     this.bindCaseToggle(this.caseBtn, () => this.find(true));
     this.findInput.addEventListener('input', () => this.find());
     this.matchBadge.addEventListener('click', () => this.findNext());
-    this.findInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); this.close(); }
-      else if (event.key === 'Enter') { event.preventDefault(); event.shiftKey ? this.findPrev() : this.findNext(); }
+    this.findInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); this.close(); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? this.findPrev() : this.findNext(); }
     });
-    this.replaceInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); this.close(); }
-      else if (event.key === 'Enter') { event.preventDefault(); this.replaceAll(); }
+    this.replaceInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); this.close(); }
+      else if (e.key === 'Enter') { e.preventDefault(); this.replaceAll(); }
     });
     this.toggleBtn.addEventListener('click', () => this.toggleReplaceRow());
     this.prevBtn.addEventListener('click', () => this.findPrev());
@@ -139,6 +125,14 @@ export class FinderDialog extends FloatingToolbar {
     }
   }
 
+  _syncMatchView() {
+    this.matchBadge.innerHTML = this.matches.length === 0 ? 'No match' : `${this.currentIndex + 1} / ${this.matches.length}`;
+    if (this.matches.length > 0) {
+      const m = this.matches[this.currentIndex];
+      this.activeSheet?.focusCell(m.x, m.y);
+    }
+  }
+
   find(forceRecompute = false) {
     const activeSheet = this.activeSheet;
     this.query = this.findInput.value;
@@ -154,33 +148,20 @@ export class FinderDialog extends FloatingToolbar {
       this.currentIndex = 0;
       this.matches = activeSheet?.df ? activeSheet.df.find({ term: this.query, caseSensitive: this.matchCase }) : [];
     }
-
-    this.matchBadge.innerHTML = this.matches.length === 0 ? 'No match' : `${this.currentIndex + 1} / ${this.matches.length}`;
-    if (this.matches.length > 0 && activeSheet) {
-      const match = this.matches[this.currentIndex];
-      activeSheet.focusCell(match.x, match.y);
-    }
+    this._syncMatchView();
   }
 
-  findNext() {
-    this.find(this.query !== this.findInput.value || this.matches.length === 0);
-  }
+  findNext() { this.find(this.query !== this.findInput.value || this.matches.length === 0); }
 
   findPrev() {
     if (this.query !== this.findInput.value || this.matches.length === 0) return this.find(true);
-    if (this.matches.length > 0) {
-      this.currentIndex = (this.currentIndex - 1 + this.matches.length) % this.matches.length;
-      this.matchBadge.innerHTML = `${this.currentIndex + 1} / ${this.matches.length}`;
-      const match = this.matches[this.currentIndex];
-      this.activeSheet?.focusCell(match.x, match.y);
-    }
+    this.currentIndex = (this.currentIndex - 1 + this.matches.length) % this.matches.length;
+    this._syncMatchView();
   }
 
   replaceAll() {
-    if (!this.query) return;
     const activeSheet = this.activeSheet;
-    if (!activeSheet?.df) return;
-
+    if (!this.query || !activeSheet?.df) return;
     activeSheet.df.replaceAll({ term: this.query, caseSensitive: this.matchCase }, this.replaceInput.value);
     activeSheet.refresh();
     activeSheet.refreshSelection(true);
@@ -215,12 +196,13 @@ export class FilterDialog extends FloatingToolbar {
       <div class="finder-row filter-row filter-bottom-row">
         <span class="filter-col-title" title="Selected column header"></span>
         <div class="finder-btn-group">
-          <button class="finder-action-icon-btn case-btn icon" type="button" title="Match Case" aria-label="Match Case" aria-pressed="false"></button>
-          <button class="finder-action-icon-btn apply-btn icon" type="button" title="Apply Filter (Enter)" aria-label="Apply Filter"></button>
-          <button class="finder-action-icon-btn close-btn icon" type="button" title="Close (Escape)" aria-label="Close"></button>
+          <button class="finder-action-icon-btn case-btn icon" type="button" title="Match Case" aria-label="Match Case" aria-pressed="false" data-icon="match_case"></button>
+          <button class="finder-action-icon-btn apply-btn icon" type="button" title="Apply Filter (Enter)" aria-label="Apply Filter" data-icon="on"></button>
+          <button class="finder-action-icon-btn close-btn icon" type="button" title="Close (Escape)" aria-label="Close" data-icon="off"></button>
         </div>
       </div>
     `;
+    hydrateIcons(this.widget);
 
     this.colInput = new NumInput(1, 1, 999, 'linear');
     this.colInput.setAttribute('aria-label', 'Column number');
@@ -235,18 +217,13 @@ export class FilterDialog extends FloatingToolbar {
     this.applyBtn = this.widget.querySelector('.apply-btn');
     this.closeBtn = this.widget.querySelector('.close-btn');
 
-    setIcon(this.applyBtn, 'on');
-    setIcon(this.closeBtn, 'off');
-
-    this.bindCaseToggle(this.caseBtn, () => {
-      if (this.filterInput.value) this.applyFilter();
-    });
+    this.bindCaseToggle(this.caseBtn, () => { if (this.filterInput.value) this.applyFilter(); });
     this.applyBtn.addEventListener('click', () => this.applyFilter());
     this.closeBtn.addEventListener('click', () => this.close());
 
-    const handleKeydown = (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.close(); }
-      else if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); this.applyFilter(); }
+    const handleKeydown = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.close(); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); this.applyFilter(); }
     };
 
     this.filterInput.addEventListener('keydown', handleKeydown);
@@ -276,22 +253,17 @@ export class FilterDialog extends FloatingToolbar {
 
   updateColTitle() {
     const df = this.activeSheet?.df;
-    if (!df) {
-      if (this.colTitle) this.colTitle.textContent = '';
-      return;
-    }
+    if (!this.colTitle) return;
+    if (!df) { this.colTitle.textContent = ''; return; }
     const colIndex = this.getColIndex();
     const title = df.get(colIndex, 0)?.trim() || `Column ${colIndex + 1}`;
-    if (this.colTitle) {
-      this.colTitle.textContent = title;
-      this.colTitle.setAttribute('title', `Column ${colIndex + 1}: ${title}`);
-    }
+    this.colTitle.textContent = title;
+    this.colTitle.setAttribute('title', `Column ${colIndex + 1}: ${title}`);
   }
 
   open(colIndex) {
     if (getCsvHandle()?.viewOnly) {
-      Notification.warning('Filter is not available in Fast Preview mode.', 'Filter');
-      return;
+      return Notification.warning('Filter is not available in Fast Preview mode.', 'Filter');
     }
     const activeSheet = this.activeSheet;
     if (!activeSheet?.df) return;
@@ -304,7 +276,7 @@ export class FilterDialog extends FloatingToolbar {
     const maxCols = Math.max(1, activeSheet.df.width);
     this.colInput.min = 1;
     this.colInput.max = maxCols;
-    const targetCol = (colIndex !== undefined && colIndex !== null && colIndex >= 0) ? colIndex + 1 : activeSheet.x + 1;
+    const targetCol = (colIndex != null && colIndex >= 0) ? colIndex + 1 : activeSheet.x + 1;
     this.colInput.value = Math.max(1, Math.min(targetCol, maxCols));
     this.updateColTitle();
 
@@ -330,10 +302,8 @@ export class FilterDialog extends FloatingToolbar {
   applyFilter() {
     const activeSheet = this.activeSheet;
     if (!activeSheet?.df) return;
-
     this.updateColTitle();
     activeSheet.setFilter(this.getColIndex(), this.filterInput.value, this.matchCase);
-
     if (activeSheet.filterRows === null) {
       this.countBadge.textContent = '';
     } else {
@@ -343,7 +313,5 @@ export class FilterDialog extends FloatingToolbar {
   }
 }
 
-if (typeof customElements !== 'undefined') {
-  if (!customElements.get('ui-finder')) customElements.define('ui-finder', FinderDialog);
-  if (!customElements.get('ui-filter')) customElements.define('ui-filter', FilterDialog);
-}
+defineEl('ui-finder', FinderDialog);
+defineEl('ui-filter', FilterDialog);

@@ -1,10 +1,8 @@
 /* ==========================================================================
-   NanoCell CSV - Consolidated Single-File Stylesheet (app/style.css)
+   NanoCell CSV - Consolidated Stylesheet (app/style.css)
    ========================================================================== */
 
-/* --------------------------------------------------------------------------
-   1. Typography & Font Face Setup
-   -------------------------------------------------------------------------- */
+/* 1. Typography & Root Tokens */
 @font-face {
   font-family: "inconsolata";
   src: url("fonts/Inconsolata-Regular.ttf") format("truetype");
@@ -27,13 +25,9 @@
   --icon-size: 24px;
 }
 
-/* --------------------------------------------------------------------------
-   2. Theme Token Specifications (Light, Solarized, Dark, Night, Nord, Dracula, Slate)
-   -------------------------------------------------------------------------- */
-
+/* 2. Theme Token Specifications */
 :root,
-[data-theme],
-body[data-theme] {
+[data-theme] {
   --th-bg: var(--bg1);
   --th-txt: var(--txt-soft);
   --body-bg: var(--bg2);
@@ -58,10 +52,8 @@ body[data-theme] {
   --num-txt: var(--orange);
 }
 
-/* Light Theme */
 :root,
-[data-theme="light"],
-body[data-theme="light"] {
+[data-theme="light"] {
   --blue: #005cc5;
   --orange: #e95f00;
   --green: #28a745;
@@ -90,9 +82,7 @@ body[data-theme="light"] {
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 
-/* Solarized Theme */
-[data-theme="solarized"],
-body[data-theme="solarized"] {
+[data-theme="solarized"] {
   --blue: #268bd2;
   --orange: #cb4b16;
   --green: #859900;
@@ -122,9 +112,8 @@ body[data-theme="solarized"] {
   --shadow-lg: 0 10px 15px -3px rgba(7, 54, 66, 0.15);
 }
 
-/* Dark Theme */
 [data-theme="dark"],
-body[data-theme="dark"] {
+[data-theme="night"] {
   --blue: #8fbbf3;
   --orange: #fd971f;
   --green: #a6e22e;
@@ -153,40 +142,20 @@ body[data-theme="dark"] {
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
 }
 
-/* Night Theme */
-[data-theme="night"],
-body[data-theme="night"] {
-  --blue: #8fbbf3;
-  --orange: #fd971f;
-  --green: #a6e22e;
-  --red: #f92672;
-  --purple: #ae81ff;
-  --yellow: #ffd866;
-  --white: #bbb;
-  --grey: grey;
-  --black: #000000;
+[data-theme="night"] {
   --bg1: #0d0d0d;
   --bg2: #242424;
-  --txt: #ccc;
   --txt-soft: #888888;
   --border: #5a5a5a;
   --active: var(--orange);
-  --icon-color: #858585;
   --icon-hover-color: #e05555;
-  --icon-hover-bg: rgba(255, 255, 255, 0.092);
-  --modal-backdrop: rgba(0, 0, 0, 0.75);
   --scrollbar-color: #5a5a5a;
-  --scrollbar-thumb: #3f3f46;
-  --scrollbar-thumb-hover: #52525b;
-  --scrollbar-track: #09090b;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.6);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.7);
 }
 
-/* Nord Theme */
-[data-theme="nord"],
-body[data-theme="nord"] {
+[data-theme="nord"] {
   --blue: #88c0d0;
   --orange: #d08770;
   --green: #a3be8c;
@@ -215,9 +184,7 @@ body[data-theme="nord"] {
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.55);
 }
 
-/* Dracula Theme */
-[data-theme="dracula"],
-body[data-theme="dracula"] {
+[data-theme="dracula"] {
   --blue: #8be9fd;
   --orange: #ffb86c;
   --green: #50fa7b;
@@ -246,9 +213,7 @@ body[data-theme="dracula"] {
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6);
 }
 
-/* Slate Theme */
-[data-theme="slate"],
-body[data-theme="slate"] {
+[data-theme="slate"] {
   --blue: #2563eb;
   --orange: #ea580c;
   --green: #16a34a;
@@ -289,9 +254,7 @@ body[data-theme="slate"] {
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 
-/* --------------------------------------------------------------------------
-   3. Base Layout & Structure
-   -------------------------------------------------------------------------- */
+/* 3. Base Layout & Structure */
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
@@ -299,10 +262,7 @@ body[data-theme="slate"] {
 }
 
 .hidden,
-[hidden] {
-  display: none !important;
-}
-
+[hidden] { display: none !important; }
 b { color: var(--red); }
 a { text-decoration: none; color: royalblue; }
 a:hover { text-decoration: underline; }
@@ -325,20 +285,6 @@ body {
   width: 100%;
   display: flex;
   flex-flow: column;
-}
-
-.visually-hidden {
-  position: fixed !important;
-  opacity: 0 !important;
-  left: -9999px !important;
-  top: -9999px !important;
-  pointer-events: none !important;
-  width: 1px !important;
-  height: 1px !important;
-  padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
-  border: 0 !important;
 }
 
 header,
@@ -365,8 +311,7 @@ footer {
   line-height: normal;
 }
 
-.grow,
-.header-spacer {
+.grow {
   flex: 1 1 12px;
   min-width: 8px;
   border: none;
@@ -446,23 +391,11 @@ footer {
   display: block;
 }
 
-.flex-main {
-  flex-grow: 1;
-  min-width: 36px;
-}
-
 section {
   display: flex;
   justify-content: center;
   align-items: center;
   flex-wrap: nowrap;
-}
-
-#menu {
-  flex-wrap: wrap;
-  margin: 4px;
-  user-select: none;
-  caret-color: transparent;
 }
 
 #content {
@@ -484,11 +417,8 @@ section {
   height: 100%;
 }
 
-/* --------------------------------------------------------------------------
-   4. Core UI Primitives (Buttons, Icons, Inputs & Panels)
-   -------------------------------------------------------------------------- */
-button,
-.btn {
+/* 4. Core UI Primitives (Buttons, Icons, Inputs & Panels) */
+button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -504,36 +434,28 @@ button,
   user-select: none;
 }
 
-button:not(.icon):hover,
-.btn:not(.icon):hover {
+button:not(.icon):hover {
   background-color: var(--btn-hover);
   border-color: var(--active);
   color: var(--active);
 }
 
-button:not(.icon):active,
-.btn:not(.icon):active {
-  background-color: var(--btn-active);
-}
+button:not(.icon):active { background-color: var(--btn-active); }
 
 button:focus,
-.btn:focus,
 button:focus-visible,
-.btn:focus-visible,
 .icon:focus-visible {
   outline: none;
   border-color: var(--active);
   box-shadow: 0 0 0 2px var(--btn-focus-ring, var(--active));
 }
 
-button:disabled,
-.btn:disabled {
+button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
 }
 
-/* Unified Icon System */
 .icon,
 button.icon {
   display: inline-flex;
@@ -571,17 +493,17 @@ button.icon {
   pointer-events: none;
 }
 
-.icon:not(#lock):not(footer img):hover {
+.icon:not(#lock):hover {
   background-color: var(--icon-hover-bg, rgba(148, 163, 184, 0.08));
   border-color: transparent;
   color: inherit;
 }
 
-.icon:not(#lock):not(footer img):hover::before {
+.icon:not(#lock):hover::before {
   background-color: var(--icon-hover-color, var(--active));
 }
 
-.icon:not(#lock):not(footer img):active {
+.icon:not(#lock):active {
   background-color: var(--icon-hover-bg, rgba(148, 163, 184, 0.16));
   border-color: transparent;
 }
@@ -603,11 +525,8 @@ button.icon {
   background-color: var(--white, #ffffff) !important;
 }
 
-.icon.expanded::before {
-  transform: rotate(90deg);
-}
+.icon.expanded::before { transform: rotate(90deg); }
 
-/* Header Install App Button */
 .menu-install-btn {
   display: inline-flex;
   align-items: center;
@@ -636,7 +555,6 @@ button.icon {
 .menu-install-btn:active { background-color: #32772d; transform: translateY(1px); }
 .menu-install-btn:focus-visible { outline: 2px solid #2e7d32; outline-offset: 1px; }
 
-/* Static Footer Lock Icon */
 #footer #lock {
   margin: 0 4px 0 10px;
   cursor: default;
@@ -657,16 +575,13 @@ button.icon {
   cursor: pointer;
 }
 
-#footer #lock.warning::before {
-  background-color: var(--red, #dc2626) !important;
-}
+#footer #lock.warning::before { background-color: var(--red, #dc2626) !important; }
 
 #footer #lock.warning:hover {
   background-color: color-mix(in srgb, var(--red, #dc2626) 25%, transparent) !important;
   border-color: var(--red, #dc2626) !important;
 }
 
-/* Standard Form Inputs */
 input,
 textarea {
   caret-color: auto;
@@ -692,7 +607,11 @@ textarea:active,
   box-shadow: 0 0 0 2px var(--btn-focus-ring, var(--active));
 }
 
-.floating-panel {
+.floating-panel,
+.dialog-small,
+.cmd-palette-modal,
+.finder-widget,
+.ui-toast-card {
   background-color: var(--modal-bg);
   color: var(--txt);
   border: 1px solid var(--table-borders);
@@ -701,9 +620,7 @@ textarea:active,
   font-family: var(--font-family-ui);
 }
 
-/* --------------------------------------------------------------------------
-   5. Sheet Component (<ui-sheet>, .sheet, Table Grid)
-   -------------------------------------------------------------------------- */
+/* 5. Sheet Component (<ui-sheet>, .sheet, Table Grid) */
 ui-sheet,
 .sheet {
   display: flex;
@@ -759,7 +676,8 @@ ui-sheet,
   overflow: hidden !important;
 }
 
-.noclick { pointer-events: none; }
+.noclick,
+.sheet div { pointer-events: none; }
 
 .sheet .row-header {
   text-align: end;
@@ -774,8 +692,6 @@ ui-sheet,
   display: flex;
   align-items: center;
 }
-
-.sheet div { pointer-events: none; }
 
 .sheet input,
 .sheet input:focus {
@@ -805,6 +721,7 @@ ui-sheet,
 .num { text-align: right; color: var(--num-txt); justify-content: flex-end; }
 .error { color: var(--red); text-align: center; justify-content: center; }
 .non-compliant { color: var(--purple); }
+.cell-space-dot { color: var(--dots, inherit); }
 
 /* Grid Scroller (<ui-scroller>) */
 ui-scroller {
@@ -839,11 +756,7 @@ ui-scroller.horizontal[data-size="lg"] { width: 50vw; height: 8px; }
 ui-scroller.horizontal[data-size="md"] { width: 20vw; height: 8px; }
 ui-scroller.horizontal[data-size="sm"] { width: 10vw; height: 8px; }
 
-.cell-space-dot { color: var(--dots, inherit); }
-
-/* --------------------------------------------------------------------------
-   6. Context Menus (ui-cmenu)
-   -------------------------------------------------------------------------- */
+/* 6. Context Menus (ui-cmenu) */
 ui-cmenu {
   display: none;
   position: fixed;
@@ -881,17 +794,20 @@ ui-cmenu table {
 }
 
 ui-cmenu.open,
-ui-cmenu.visible,
-ui-cmenu[open] {
+ui-cmenu[open],
+ui-command-palette.open,
+ui-command-palette[open],
+ui-finder.open,
+ui-finder[open],
+ui-filter.open,
+ui-filter[open] {
   display: block;
 }
 
 ui-cmenu tr { cursor: pointer; }
 ui-cmenu tr:hover { background-color: var(--cmenu-hover); }
 
-/* --------------------------------------------------------------------------
-   7. Modals & Dialogs (#dialog)
-   -------------------------------------------------------------------------- */
+/* 7. Modals & Dialogs (#dialog) */
 #dialog { z-index: 2000; }
 
 .dialog-small,
@@ -906,9 +822,6 @@ ui-cmenu tr:hover { background-color: var(--cmenu-hover); }
 .dialog-small {
   max-height: 50vh;
   position: relative;
-  border: 1px solid var(--table-borders);
-  border-radius: 8px;
-  box-shadow: var(--shadow-lg);
   padding: 16px;
 }
 
@@ -931,15 +844,8 @@ ui-cmenu tr:hover { background-color: var(--cmenu-hover); }
 
 .dialog-large #close-dialog { position: fixed; }
 
-/* --------------------------------------------------------------------------
-   8. Command Palette (<ui-command-palette>)
-   -------------------------------------------------------------------------- */
+/* 8. Command Palette (<ui-command-palette>) */
 ui-command-palette { display: none; }
-
-ui-command-palette.open,
-ui-command-palette[open] {
-  display: block;
-}
 
 .cmd-palette-backdrop {
   position: fixed;
@@ -958,13 +864,7 @@ ui-command-palette[open] {
   transform: translateX(-50%);
   width: 500px;
   max-width: 90vw;
-  background-color: var(--modal-bg);
-  color: var(--txt);
-  border: 1px solid var(--table-borders);
-  border-radius: 8px;
-  box-shadow: var(--shadow-lg);
   z-index: 10000;
-  font-family: var(--font-family-ui);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1020,11 +920,10 @@ ui-command-palette[open] {
   background-color: var(--bg2);
 }
 
-.cmd-palette-item.selected {
-  border-left-color: var(--active);
-}
+.cmd-palette-item.selected { border-left-color: var(--active); }
 
-.cmd-palette-empty {
+.cmd-palette-empty,
+.validation-empty-state {
   padding: 16px;
   text-align: center;
   color: var(--grey);
@@ -1060,9 +959,7 @@ ui-command-palette[open] {
   margin: 0 2px;
 }
 
-/* --------------------------------------------------------------------------
-   9. Find & Replace Floating Widget (<ui-finder>) & Filter Widget (<ui-filter>)
-   -------------------------------------------------------------------------- */
+/* 9. Find & Replace (<ui-finder>) & Filter (<ui-filter>) */
 ui-finder,
 ui-filter {
   position: fixed;
@@ -1072,13 +969,14 @@ ui-filter {
   display: none;
 }
 
-ui-finder.visible,
-ui-finder.open,
-ui-finder[open],
-ui-filter.visible,
-ui-filter.open,
-ui-filter[open] {
-  display: block;
+.finder-widget {
+  padding: 6px 8px;
+  width: 360px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: none;
 }
 
 .filter-widget {
@@ -1147,22 +1045,6 @@ ui-filter[open] {
   line-height: 28px;
 }
 
-.finder-widget {
-  background-color: var(--modal-bg);
-  color: var(--txt);
-  border: 1px solid var(--table-borders);
-  border-radius: 8px;
-  box-shadow: var(--shadow-lg);
-  padding: 6px 8px;
-  font-family: var(--font-family-ui);
-  width: 360px;
-  max-width: 90vw;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  user-select: none;
-}
-
 .finder-row-spacer,
 .finder-toggle-btn.icon {
   width: 24px;
@@ -1201,16 +1083,17 @@ ui-filter[open] {
   white-space: nowrap;
 }
 
-.finder-btn-group {
+.finder-btn-group,
+.validation-pane-action-bar,
+.validation-col-actions,
+.validation-item-actions {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
 }
 
-/* --------------------------------------------------------------------------
-   10. Notification Toasts (<ui-msg>)
-   -------------------------------------------------------------------------- */
+/* 10. Notification Toasts (<ui-msg>) */
 .ui-toast-container {
   position: fixed;
   top: 20px;
@@ -1227,21 +1110,14 @@ ui-filter[open] {
 .ui-toast-card {
   pointer-events: auto;
   position: relative;
-  background-color: var(--modal-bg);
-  color: var(--txt);
-  border: 1px solid var(--table-borders);
-  border-radius: 8px;
-  box-shadow: var(--shadow-lg);
   padding: 10px 14px;
   display: flex;
   align-items: center;
   gap: 12px;
-  font-family: var(--font-family-ui);
   line-height: 1.4;
   overflow: hidden;
 }
 
-.ui-toast-card.ui-msg-closing { display: none; }
 .ui-toast-body { flex: 1; min-width: 0; }
 .ui-toast-title { font-weight: 600; margin-bottom: 2px; color: var(--fh-txt); }
 .ui-msg-text { word-break: break-word; }
@@ -1251,20 +1127,6 @@ ui-filter[open] {
   align-items: center;
   gap: 6px;
   margin-top: 6px;
-}
-
-.ui-msg-ok,
-.item-accept-btn,
-.col-accept-btn {
-  --icon-url: url("icons/on.svg");
-}
-
-.ui-msg-cancel,
-.ui-toast-close-btn,
-.close-btn,
-.item-reject-btn,
-.col-reject-btn {
-  --icon-url: url("icons/off.svg");
 }
 
 .ui-toast-progress {
@@ -1287,9 +1149,7 @@ ui-filter[open] {
   to { width: 0%; }
 }
 
-/* --------------------------------------------------------------------------
-   11. Settings UI & Toggle Switch Styles
-   -------------------------------------------------------------------------- */
+/* 11. Settings UI & Toggle Switch Styles */
 .stg-container {
   padding: 24px;
   max-width: 680px;
@@ -1339,8 +1199,7 @@ ui-filter[open] {
   box-shadow: 0 0 0 2px var(--btn-focus-ring, var(--active));
 }
 
-.stg-header h1,
-.stg-header h2 {
+.stg-header h1 {
   font-size: 20px;
   font-weight: 600;
   margin-bottom: 20px;
@@ -1403,7 +1262,6 @@ ui-filter[open] {
   align-items: center;
 }
 
-/* Modern Toggle Switch */
 .ui-bool-toggle {
   display: inline-block;
   cursor: pointer;
@@ -1437,9 +1295,7 @@ ui-filter[open] {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-.ui-bool-toggle.checked .toggle-thumb {
-  transform: translateX(20px);
-}
+.ui-bool-toggle.checked .toggle-thumb { transform: translateX(20px); }
 
 .stg-footer {
   margin-top: 24px;
@@ -1447,13 +1303,8 @@ ui-filter[open] {
   justify-content: flex-end;
 }
 
-.btn-reset-settings { --icon-url: url("icons/reset_settings.svg"); }
-
-/* --------------------------------------------------------------------------
-   12. Validation Pane (<ui-validation-pane>)
-   -------------------------------------------------------------------------- */
-ui-validation-pane,
-.ui-validation-pane {
+/* 12. Validation Pane (<ui-validation-pane>) */
+ui-validation-pane {
   flex: 0 0 360px;
   height: 100%;
   background-color: var(--modal-bg);
@@ -1465,8 +1316,7 @@ ui-validation-pane,
 }
 
 ui-validation-pane.open,
-ui-validation-pane[open],
-.ui-validation-pane.open {
+ui-validation-pane[open] {
   display: flex;
 }
 
@@ -1504,25 +1354,25 @@ ui-validation-pane[open],
 .validation-rule-title { font-size: 12px; }
 .validation-col-label { font-size: 12px; font-family: var(--font-family-mono); }
 
-.validation-badge {
-  background-color: var(--blue);
-  color: #ffffff;
+.validation-badge,
+.validation-col-count {
   font-size: 11px;
   font-weight: 600;
   border-radius: 10px;
   padding: 1px 6px;
-  line-height: normal;
-  display: none;
   flex-shrink: 0;
 }
 
-.validation-pane-action-bar,
-.validation-col-actions,
-.validation-item-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
+.validation-badge {
+  background-color: var(--blue);
+  color: #ffffff;
+  line-height: normal;
+  display: none;
+}
+
+.validation-col-count {
+  background-color: var(--table-borders);
+  color: var(--txt);
 }
 
 .validation-pane-content {
@@ -1532,25 +1382,14 @@ ui-validation-pane[open],
   position: relative;
 }
 
-.validation-empty-state {
-  text-align: center;
-  color: var(--grey);
-  padding: 20px;
-  font-style: italic;
-  font-size: 12px;
-}
-
-.validation-rules-view {
+.validation-rules-view,
+.validation-columns-view {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.validation-columns-view {
-  display: none;
-  flex-direction: column;
-  gap: 6px;
-}
+.validation-columns-view { display: none; }
 
 .validation-rule-card,
 .validation-col-card,
@@ -1569,15 +1408,8 @@ ui-validation-pane[open],
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.validation-rule-card {
-  gap: 10px;
-  user-select: none;
-}
-
-.validation-col-card {
-  justify-content: space-between;
-  gap: 8px;
-}
+.validation-rule-card { gap: 10px; user-select: none; }
+.validation-col-card { justify-content: space-between; gap: 8px; }
 
 .validation-rule-card:hover,
 .validation-col-card:hover {
@@ -1625,16 +1457,6 @@ ui-validation-pane[open],
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.validation-col-count {
-  background-color: var(--table-borders);
-  color: var(--txt);
-  font-size: 11px;
-  font-weight: bold;
-  padding: 1px 6px;
-  border-radius: 10px;
-  flex-shrink: 0;
 }
 
 .validation-detail-view {
@@ -1689,11 +1511,6 @@ ui-validation-pane[open],
   background-color: var(--red) !important;
 }
 
-.back-btn { --icon-url: url("icons/arrow_left.svg"); }
-.accept-all-btn { --icon-url: url("icons/done_all.svg"); }
-.reject-all-btn { --icon-url: url("icons/exit.svg"); }
-.col-inspect-btn { --icon-url: url("icons/arrow_right.svg"); }
-
 .validation-virtual-spacer {
   position: relative;
   width: 100%;
@@ -1722,9 +1539,7 @@ ui-validation-pane[open],
 .diff-new { color: var(--green); font-weight: 600; }
 .diff-arrow { color: var(--grey); flex-shrink: 0; }
 
-/* --------------------------------------------------------------------------
-   13. Scrollbars & About Pane (<ui-about>)
-   -------------------------------------------------------------------------- */
+/* 13. Scrollbars & About Pane (<ui-about>) */
 .scroll {
   overflow: auto;
   white-space: nowrap;
@@ -1817,8 +1632,7 @@ ui-about {
   ui-finder,
   ui-filter,
   ui-command-palette,
-  ui-validation-pane,
-  .ui-validation-pane {
+  ui-validation-pane {
     display: none !important;
   }
 

@@ -1,39 +1,22 @@
 /**
  * @file app/js/Sheet.js
  * Unified <ui-sheet> spreadsheet web component: virtualized table DOM rendering,
- * viewport & range selection, inline cell editing, clipboard operations, and mouse routing.
+ * viewport & range selection, inline cell editing, clipboard operations, and mouse/key routing.
  */
 
 import { Dataframe, orderRange, isUrl, isIsoDate } from '../../core/Dataframe.js';
 import { CsvParser, CsvSerializer, SeparatorDetector } from '../../core/Csv.js';
 import { getSheet, setSheet, Setting, settings } from './state.js';
-import { dom, updateFooter, refreshScrollbars } from './AppLayout.js';
+import { BaseElement, defineEl } from './icons.js';
+import { dom, updateFooter, refreshScrollbars, getScrollBoundsY, getScrollBoundsX } from './AppLayout.js';
 import { FinderDialog, FilterDialog } from './SheetOverlays.js';
 import { Notification } from './Notification.js';
 
-const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
-
-let dragTarget = null; // 'cell' | 'rowHeader' | 'colHeader' | 'cornerHeader' | 'scrollY' | 'scrollX' | null
-let mouseX = 0;
-let mouseY = 0;
+let dragTarget = null;
+let mouseX = 0, mouseY = 0;
 let scrollIntervalId = null;
-let cachedScrollY = null;
-let cachedScrollX = null;
+let cachedScrollY = null, cachedScrollX = null;
 let globalMouseBound = false;
-
-function getScrollBoundsY(sheet) {
-  if (!sheet.rows[1]) return null;
-  const offset = sheet.rows[1].getBoundingClientRect().top;
-  const trackHeight = Math.max(1, sheet.getBoundingClientRect().bottom - offset);
-  return { offset, trackHeight };
-}
-
-function getScrollBoundsX(sheet) {
-  if (!sheet.rows[0]?.cells[0]) return null;
-  const offset = sheet.rows[0].cells[0].getBoundingClientRect().left;
-  const trackWidth = Math.max(1, sheet.getBoundingClientRect().right - offset);
-  return { offset, trackWidth };
-}
 
 function startOutOfBoundsScroll() {
   if (scrollIntervalId !== null) clearInterval(scrollIntervalId);
@@ -83,9 +66,7 @@ function bindGlobalMouse() {
 
   document.addEventListener('mouseup', (event) => {
     if (event.buttons < 1) {
-      dragTarget = null;
-      cachedScrollY = null;
-      cachedScrollX = null;
+      dragTarget = cachedScrollY = cachedScrollX = null;
       if (scrollIntervalId !== null) {
         clearInterval(scrollIntervalId);
         scrollIntervalId = null;
@@ -94,8 +75,7 @@ function bindGlobalMouse() {
   });
 
   document.addEventListener('mousedown', (event) => {
-    const isSelectable = Boolean(event.target.closest?.('ui-about'));
-    if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'BUTTON' && !isSelectable) {
+    if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'BUTTON' && !event.target.closest?.('ui-about')) {
       event.preventDefault();
     }
     if (event.target.tagName !== 'INPUT' && document.activeElement?.tagName === 'INPUT') {
@@ -154,9 +134,7 @@ function bindGlobalMouse() {
     mouseX = event.clientX;
     mouseY = event.clientY;
     if (event.buttons < 1) {
-      dragTarget = null;
-      cachedScrollY = null;
-      cachedScrollX = null;
+      dragTarget = cachedScrollY = cachedScrollX = null;
       return;
     }
     const sheet = getSheet();
@@ -212,19 +190,15 @@ export class Sheet extends BaseElement {
 
     this.id = 'sheet';
     this.classList.add('sheet');
-
     this.table = document.createElement('table');
     this.appendChild(this.table);
 
     this.bindEvents();
 
-    const container = dom?.mainContainer || (typeof document !== 'undefined' ? document.getElementById('main-container') : null);
+    const container = dom?.mainContainer || globalThis.document?.getElementById?.('main-container');
     if (container) {
       container.querySelectorAll('ui-sheet, #sheet').forEach(el => {
-        if (el !== this) {
-          el.disconnectedCallback?.();
-          el.remove();
-        }
+        if (el !== this) { el.disconnectedCallback?.(); el.remove(); }
       });
       if (this.parentNode !== container) container.appendChild(this);
       if (dom?.content?.scrollerY) container.appendChild(dom.content.scrollerY);
@@ -263,19 +237,13 @@ export class Sheet extends BaseElement {
   get baseX() { return this._baseX; }
   set baseX(col) {
     const next = Math.max(0, col);
-    if (next !== this._baseX) {
-      this._baseX = next;
-      this.refresh();
-    }
+    if (next !== this._baseX) { this._baseX = next; this.refresh(); }
   }
 
   get baseY() { return this._baseY; }
   set baseY(row) {
     const next = Math.max(0, row);
-    if (next !== this._baseY) {
-      this._baseY = next;
-      this.refresh();
-    }
+    if (next !== this._baseY) { this._baseY = next; this.refresh(); }
   }
 
   // --- Virtualized Table Rendering ---
@@ -328,36 +296,29 @@ export class Sheet extends BaseElement {
     });
   }
 
-  refreshScrollbars() {
-    refreshScrollbars(this);
-  }
+  refreshScrollbars() { refreshScrollbars(this); }
+  updateFooter() { updateFooter(this); }
 
   renderCell(cellEl, x, y) {
     const contentDiv = cellEl?.firstChild;
     if (!contentDiv) return;
-    if (y < 0 || y >= this.df.height) {
-      contentDiv.className = '';
-      contentDiv.textContent = '';
-      return;
-    }
-
-    const value = this.df.get(x, y);
+    const value = (y >= 0 && y < this.df.height) ? this.df.get(x, y) : '';
     if (!value) {
       contentDiv.className = '';
       contentDiv.textContent = '';
       return;
     }
 
-    let className = '';
-    if (value[0] === '!') className += ' error';
-    if (!isNaN(value)) className += ' num';
-    if (isIsoDate(value)) className += ' date';
-    if (isUrl(value)) className += ' url';
+    let cls = '';
+    if (value[0] === '!') cls += ' error';
+    if (!isNaN(value)) cls += ' num';
+    if (isIsoDate(value)) cls += ' date';
+    if (isUrl(value)) cls += ' url';
     if (settings.highlightNonCompliant && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
-      className += ' non-compliant';
+      cls += ' non-compliant';
     }
 
-    contentDiv.className = className.charCodeAt(0) === 32 ? className.slice(1) : className;
+    contentDiv.className = cls.trimStart();
     if (!value.includes('&') && !value.includes('<') && !value.includes('\n')) {
       contentDiv.textContent = value;
     } else {
@@ -372,7 +333,7 @@ export class Sheet extends BaseElement {
     const headerText = this.fixTop ? this.df.get(colIndex, 0) : '';
     cell.firstChild.textContent = headerText.length > 0 ? headerText : colIndex + 1;
 
-    if (this.expandedCol !== null && this.expandedCol !== undefined) {
+    if (this.expandedCol != null) {
       const isExpanded = colIndex === this.expandedCol;
       cell.classList.toggle('col-expanded', isExpanded);
       cell.classList.toggle('col-collapsed', !isExpanded);
@@ -389,9 +350,6 @@ export class Sheet extends BaseElement {
     const label = actualY !== undefined ? (actualY >= 0 ? String(actualY + 1) : '') : String(this.baseY + viewY + 1);
     (cell.firstChild || cell).textContent = label;
   }
-
-  refreshScrollbars() { refreshScrollbars(this); }
-  updateFooter() { updateFooter(this); }
 
   // --- Events & Filtering ---
 
@@ -455,6 +413,70 @@ export class Sheet extends BaseElement {
     });
   }
 
+  handleKeyDown(event, key, ctrlDown, shift, alt) {
+    const pageSize = settings?.rows || 10;
+    const maxX = Math.max(0, this.df.width - 1);
+    const maxY = Math.max(0, this.rowCount - 1);
+
+    if (key === 'PAGEUP' || key === 'PAGEDOWN') {
+      event.preventDefault();
+      this.y = key === 'PAGEUP' ? Math.max(0, this.y - pageSize) : Math.min(maxY, this.y + pageSize);
+      this.refreshSelection();
+      return true;
+    }
+    if (key === 'HOME') {
+      event.preventDefault();
+      this.x = 0;
+      if (ctrlDown) this.y = 0;
+      this.refreshSelection();
+      return true;
+    }
+    if (key === 'END' && ctrlDown) {
+      event.preventDefault();
+      this.x = maxX;
+      this.y = maxY;
+      this.refreshSelection();
+      return true;
+    }
+    if (key === 'F2' || key === 'ENTER') {
+      event.preventDefault();
+      if (!this.df?.lock) this.startEdit();
+      return true;
+    }
+    if (key === 'TAB') {
+      event.preventDefault();
+      this.isSelectingRange = false;
+      this.rangeEnd = undefined;
+      this.x += shift ? -1 : 1;
+      this.refreshSelection();
+      return true;
+    }
+    if (key === 'ARROWUP' || key === 'ARROWDOWN' || key === 'ARROWLEFT' || key === 'ARROWRIGHT') {
+      event.preventDefault();
+      if (ctrlDown) {
+        if (key === 'ARROWUP') this.y = 0;
+        else if (key === 'ARROWDOWN') this.y = maxY;
+        else if (key === 'ARROWLEFT') this.x = 0;
+        else this.x = maxX;
+      } else {
+        if (key === 'ARROWUP') this.y--;
+        else if (key === 'ARROWDOWN') this.y++;
+        else if (key === 'ARROWLEFT') this.x--;
+        else this.x++;
+      }
+      this.refreshSelection();
+      return true;
+    }
+    if (event.key.length === 1 && !ctrlDown && !event.metaKey && !alt) {
+      if (!this.df?.lock) {
+        event.preventDefault();
+        this.startEdit(event.key);
+      }
+      return true;
+    }
+    return false;
+  }
+
   getRowIndex(viewY) {
     if (!this.filterRows) return viewY;
     return (viewY >= 0 && viewY < this.filterRows.length) ? this.filterRows[viewY] : -1;
@@ -477,9 +499,7 @@ export class Sheet extends BaseElement {
     }
   }
 
-  openFilter(colIndex) {
-    this.filter?.open(colIndex);
-  }
+  openFilter(colIndex) { this.filter?.open(colIndex); }
 
   // --- Selection & Viewport ---
 
@@ -488,40 +508,22 @@ export class Sheet extends BaseElement {
     return orderRange({ xmin: this.x, xmax: end.x, ymin: this.y, ymax: end.y });
   }
 
-  getSelectedMatrix() {
-    return this.df.slice(this.getOrderedRange());
-  }
+  getSelectedMatrix() { return this.df.slice(this.getOrderedRange()); }
 
-  focusCell(x, y) {
+  selectRange(x, y, endX, endY, scrollIntoView = false) {
     this.isSelectingRange = false;
-    this.rangeEnd = undefined;
     this.x = x;
     this.y = y;
-    this.refreshSelection(true);
+    this.rangeEnd = (endX !== undefined && endY !== undefined && (endX !== x || endY !== y))
+      ? { x: endX, y: endY }
+      : undefined;
+    this.refreshSelection(scrollIntoView);
   }
 
-  selectAll() {
-    this.x = 0;
-    this.y = 0;
-    this.rangeEnd = { x: this.df.width - 1, y: this.df.height - 1 };
-    this.refreshSelection(false);
-  }
-
-  selectCol(startCol, endCol = startCol) {
-    this.x = startCol;
-    this.y = 0;
-    this.rangeEnd = { x: endCol, y: Math.max(0, this.df.height - 1) };
-    this.isSelectingRange = false;
-    this.refreshSelection(false);
-  }
-
-  selectRow(startRow, endRow = startRow) {
-    this.x = 0;
-    this.y = startRow;
-    this.rangeEnd = { x: Math.max(0, this.df.width - 1), y: endRow };
-    this.isSelectingRange = false;
-    this.refreshSelection(false);
-  }
+  focusCell(x, y) { this.selectRange(x, y, undefined, undefined, true); }
+  selectAll() { this.selectRange(0, 0, this.df.width - 1, this.df.height - 1, false); }
+  selectCol(startCol, endCol = startCol) { this.selectRange(startCol, 0, endCol, Math.max(0, this.df.height - 1), false); }
+  selectRow(startRow, endRow = startRow) { this.selectRange(0, startRow, Math.max(0, this.df.width - 1), endRow, false); }
 
   isCellInView(x, y) {
     return x >= this.baseX && y >= this.baseY && x < this.baseX + this.width && y < this.baseY + this.height;
@@ -533,8 +535,7 @@ export class Sheet extends BaseElement {
     }
     if (this.rangeEnd) {
       const range = this.getOrderedRange();
-      const vxEnd = this.baseX + this.width;
-      const vyEnd = this.baseY + this.height;
+      const vxEnd = this.baseX + this.width, vyEnd = this.baseY + this.height;
       const rx = (this.baseX < range.xmin && vxEnd > range.xmin) ? range.xmin : (this.baseX > range.xmin && this.baseX <= range.xmax ? this.baseX : undefined);
       const ry = (this.baseY < range.ymin && vyEnd > range.ymin) ? range.ymin : (this.baseY > range.ymin && this.baseY <= range.ymax ? this.baseY : undefined);
       if (rx !== undefined && ry !== undefined) {
@@ -603,7 +604,7 @@ export class Sheet extends BaseElement {
       this.reload();
       return;
     }
-    const calcStep = (delta) => delta > 0 ? Math.floor(delta / 16) : Math.ceil(delta / 16);
+    const calcStep = (d) => d > 0 ? Math.floor(d / 16) : Math.ceil(d / 16);
     if (event.altKey) {
       this.baseX += calcStep(event.deltaY);
     } else {
@@ -672,38 +673,26 @@ export class Sheet extends BaseElement {
     }
   }
 
-  editSelection(value) {
-    this.df.editRange(this.getOrderedRange(), value);
-  }
+  editSelection(value) { this.df.editRange(this.getOrderedRange(), value); }
+  deleteSelection() { this.editSelection(''); this.refresh(); }
 
-  deleteSelection() {
-    this.editSelection('');
-    this.refresh();
-  }
-
-  deleteRows() {
-    const range = this.getOrderedRange();
-    this.df.deleteRows(range.ymin, range.ymax - range.ymin + 1);
-    this._y = range.ymin;
-    if (this.rangeEnd) {
-      this.rangeEnd.y = range.ymin;
-      if (this.rangeEnd.x === this.x) this.rangeEnd = undefined;
+  _deleteAxis(isRow) {
+    const r = this.getOrderedRange();
+    if (isRow) {
+      this.df.deleteRows(r.ymin, r.ymax - r.ymin + 1);
+      this._y = r.ymin;
+      if (this.rangeEnd) this.rangeEnd = this.rangeEnd.x === this.x ? undefined : { x: this.rangeEnd.x, y: r.ymin };
+    } else {
+      this.df.deleteCols(r.xmin, r.xmax - r.xmin + 1);
+      this._x = r.xmin;
+      if (this.rangeEnd) this.rangeEnd = this.rangeEnd.y === this.y ? undefined : { x: r.xmin, y: this.rangeEnd.y };
     }
     this.refresh();
     this.refreshSelection(false);
   }
 
-  deleteCols() {
-    const range = this.getOrderedRange();
-    this.df.deleteCols(range.xmin, range.xmax - range.xmin + 1);
-    this._x = range.xmin;
-    if (this.rangeEnd) {
-      this.rangeEnd.x = range.xmin;
-      if (this.rangeEnd.y === this.y) this.rangeEnd = undefined;
-    }
-    this.refresh();
-    this.refreshSelection(false);
-  }
+  deleteRows() { this._deleteAxis(true); }
+  deleteCols() { this._deleteAxis(false); }
 
   undo() { this.df.undo(); this.refresh(); }
   redo() { this.df.redo(); this.refresh(); }
@@ -719,8 +708,7 @@ export class Sheet extends BaseElement {
 
   shift(direction) {
     const range = this.getOrderedRange();
-    const rows = range.ymax - range.ymin + 1;
-    const cols = range.xmax - range.xmin + 1;
+    const rows = range.ymax - range.ymin + 1, cols = range.xmax - range.xmin + 1;
     let dx = 0, dy = 0, moved = false;
 
     if (direction === 0 && this.df.shiftRows(range.ymin, rows, 'up')) { dy = -1; moved = true; }
@@ -809,6 +797,4 @@ export class Sheet extends BaseElement {
   }
 }
 
-if (typeof customElements !== 'undefined' && !customElements.get('ui-sheet')) {
-  customElements.define('ui-sheet', Sheet);
-}
+defineEl('ui-sheet', Sheet);

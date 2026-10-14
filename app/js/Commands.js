@@ -1,9 +1,10 @@
-import { getSheet, getCsvHandle, Setting, settings, pwa, formatShortcut } from './state.js';
+import { getSheet, getCsvHandle, Setting, pwa, formatShortcut } from './state.js';
 import { AboutDialog, SettingDialog, DialogManager } from './Dialogs.js';
 import { triggerAppInstall } from './Notification.js';
 import { dom, startCoordEdit } from './AppLayout.js';
 import { ValidationPane } from './ValidationPane.js';
-import { setIcon, escapeHtml } from './icons.js';
+import { VALIDATION_RULES } from '../../core/DataValidator.js';
+import { BaseElement, defineEl, hydrateIcons, setOpen, escapeHtml } from './icons.js';
 
 function fuzzyScore(query, text) {
   if (!query) return 1;
@@ -21,9 +22,7 @@ function fuzzyScore(query, text) {
   let qIdx = 0, score = 0, consecutive = 0, prevMatchIdx = -10;
   for (let i = 0; i < t.length && qIdx < q.length; i++) {
     if (t[i] === q[qIdx]) {
-      score += 10;
-      consecutive = (i === prevMatchIdx + 1) ? consecutive + 1 : 0;
-      score += consecutive * 5;
+      score += 10 + ((i === prevMatchIdx + 1) ? (consecutive = consecutive + 1) * 5 : (consecutive = 0));
       prevMatchIdx = i;
       qIdx++;
     }
@@ -31,14 +30,12 @@ function fuzzyScore(query, text) {
   return qIdx === q.length ? score : 0;
 }
 
-class CommandPalette extends HTMLElement {
+export class CommandPalette extends BaseElement {
   static _defaultCommands = null;
 
   static setDefaultCommands(commandMap) {
     CommandPalette._defaultCommands = commandMap;
-    const existing = typeof document !== 'undefined'
-      ? (document.getElementById('palette') || document.querySelector('ui-command-palette'))
-      : null;
+    const existing = globalThis.document?.getElementById?.('palette') || globalThis.document?.querySelector?.('ui-command-palette');
     if (existing) existing.commands = commandMap;
   }
 
@@ -63,13 +60,13 @@ class CommandPalette extends HTMLElement {
     this.setAttribute('role', 'dialog');
     this.setAttribute('aria-modal', 'true');
     this.innerHTML = `
-      <div class="cmd-palette-backdrop palette-backdrop"></div>
-      <div class="cmd-palette-modal palette-container">
+      <div class="cmd-palette-backdrop"></div>
+      <div class="cmd-palette-modal">
         <div class="cmd-palette-header">
-          <input type="text" class="cmd-palette-input palette-input" placeholder="Type a command or search..." autofocus />
-          <span class="cmd-palette-close icon" role="button" title="Close (Esc)" aria-label="Close"></span>
+          <input type="text" class="cmd-palette-input" placeholder="Type a command or search..." autofocus />
+          <span class="cmd-palette-close icon" role="button" title="Close (Esc)" aria-label="Close" data-icon="off"></span>
         </div>
-        <ul class="cmd-palette-list command-list" role="listbox"></ul>
+        <ul class="cmd-palette-list" role="listbox"></ul>
         <div class="cmd-palette-footer">
           <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> Navigate</span>
           <span><kbd>&crarr;</kbd> Select</span>
@@ -77,10 +74,8 @@ class CommandPalette extends HTMLElement {
         </div>
       </div>
     `;
-
-    this.classList.remove('open');
-    this.removeAttribute('open');
-    this.style.display = 'none';
+    hydrateIcons(this);
+    setOpen(this, false);
 
     this.backdropEl = this.querySelector('.cmd-palette-backdrop');
     this.inputEl = this.querySelector('input');
@@ -88,12 +83,9 @@ class CommandPalette extends HTMLElement {
     this.closeBtn = this.querySelector('.cmd-palette-close');
 
     this.backdropEl?.addEventListener('click', () => this.close());
-    if (this.closeBtn) {
-      setIcon(this.closeBtn, 'off');
-      this.closeBtn.addEventListener('click', () => this.close());
-    }
+    this.closeBtn?.addEventListener('click', () => this.close());
     this.inputEl?.addEventListener('input', () => this.filterCommands());
-    this.inputEl?.addEventListener('keydown', (event) => this.handleKeyDown(event));
+    this.inputEl?.addEventListener('keydown', (e) => this.handleKeyDown(e));
   }
 
   get isOpen() {
@@ -104,13 +96,13 @@ class CommandPalette extends HTMLElement {
     const canInstall = pwa.getState().canInstall;
     const commandMap = this.commands || CommandPalette._defaultCommands || {};
     return Object.entries(commandMap)
-      .filter(([id, command]) => command && typeof command.run === 'function' && (id !== 'installApp' || canInstall))
-      .map(([id, command]) => ({
+      .filter(([id, cmd]) => cmd && typeof cmd.run === 'function' && (id !== 'installApp' || canInstall))
+      .map(([id, cmd]) => ({
         id,
-        label: command.label || id,
-        description: command.description || command.label || id,
-        shortcut: formatShortcut(command),
-        run: command.run
+        label: cmd.label || id,
+        description: cmd.description || cmd.label || id,
+        shortcut: formatShortcut(cmd),
+        run: cmd.run
       }));
   }
 
@@ -157,26 +149,25 @@ class CommandPalette extends HTMLElement {
   renderList() {
     this.init();
     if (!this.listEl) return;
-    this.listEl.innerHTML = '';
-
     if (this.filteredCommands.length === 0) {
       this.listEl.innerHTML = '<li class="cmd-palette-empty">No matching commands</li>';
       return;
     }
 
-    this.filteredCommands.forEach((commandItem, index) => {
+    this.listEl.innerHTML = '';
+    this.filteredCommands.forEach((cmd, idx) => {
       const li = document.createElement('li');
-      const isSelected = index === this.selectedIndex;
-      li.className = `cmd-palette-item command-item ${isSelected ? 'selected' : ''}`;
+      const isSelected = idx === this.selectedIndex;
+      li.className = `cmd-palette-item ${isSelected ? 'selected' : ''}`;
       li.setAttribute('role', 'option');
-      li.setAttribute('aria-selected', isSelected ? 'true' : 'false');
-      li.setAttribute('data-index', index);
+      li.setAttribute('aria-selected', String(isSelected));
+      li.setAttribute('data-index', idx);
       li.innerHTML = `
-        <span class="cmd-palette-item-label">${escapeHtml(commandItem.description)}</span>
-        ${commandItem.shortcut ? `<span class="cmd-palette-item-shortcut command-key">${escapeHtml(commandItem.shortcut)}</span>` : ''}
+        <span class="cmd-palette-item-label">${escapeHtml(cmd.description)}</span>
+        ${cmd.shortcut ? `<span class="cmd-palette-item-shortcut">${escapeHtml(cmd.shortcut)}</span>` : ''}
       `;
-      li.addEventListener('mouseenter', () => this.setSelectedIndex(index, false));
-      li.addEventListener('click', () => this.executeIndex(index));
+      li.addEventListener('mouseenter', () => this.setSelectedIndex(idx, false));
+      li.addEventListener('click', () => this.executeIndex(idx));
       this.listEl.appendChild(li);
     });
 
@@ -185,13 +176,13 @@ class CommandPalette extends HTMLElement {
 
   handleKeyDown(event) {
     this.init();
-    const length = this.filteredCommands.length;
-    if (event.key === 'ArrowDown' && length > 0) {
+    const len = this.filteredCommands.length;
+    if (event.key === 'ArrowDown' && len > 0) {
       event.preventDefault();
-      this.setSelectedIndex((this.selectedIndex + 1) % length, true);
-    } else if (event.key === 'ArrowUp' && length > 0) {
+      this.setSelectedIndex((this.selectedIndex + 1) % len, true);
+    } else if (event.key === 'ArrowUp' && len > 0) {
       event.preventDefault();
-      this.setSelectedIndex((this.selectedIndex - 1 + length) % length, true);
+      this.setSelectedIndex((this.selectedIndex - 1 + len) % len, true);
     } else if (event.key === 'Enter') {
       event.preventDefault();
       this.executeIndex(this.selectedIndex);
@@ -203,7 +194,7 @@ class CommandPalette extends HTMLElement {
 
   executeIndex(index) {
     const item = this.filteredCommands[index];
-    if (item && typeof item.run === 'function') {
+    if (typeof item?.run === 'function') {
       this.close();
       item.run();
     }
@@ -212,9 +203,7 @@ class CommandPalette extends HTMLElement {
   open() {
     this.init();
     this.commands ||= CommandPalette._defaultCommands;
-    this.classList.add('open');
-    this.setAttribute('open', '');
-    this.style.display = 'block';
+    setOpen(this, true, 'block');
     if (this.inputEl) this.inputEl.value = '';
     this.filterCommands();
     setTimeout(() => this.inputEl?.focus(), 10);
@@ -222,36 +211,31 @@ class CommandPalette extends HTMLElement {
 
   close() {
     this.init();
-    this.classList.remove('open');
-    this.removeAttribute('open');
-    this.style.display = 'none';
+    setOpen(this, false);
   }
 
   toggle() {
     this.init();
-    if (this.isOpen) this.close();
-    else this.open();
+    this.isOpen ? this.close() : this.open();
   }
 
   static toggle(commandMap = null) {
-    let palette = typeof document !== 'undefined'
-      ? (document.getElementById('palette') || document.querySelector('ui-command-palette'))
-      : null;
-    if (!palette && typeof document !== 'undefined') {
-      palette = document.createElement('ui-command-palette');
+    const doc = globalThis.document;
+    let palette = doc?.getElementById?.('palette') || doc?.querySelector?.('ui-command-palette');
+    if (!palette && doc) {
+      palette = doc.createElement('ui-command-palette');
       palette.id = 'palette';
-      document.body.appendChild(palette);
+      doc.body.appendChild(palette);
     }
     if (palette) {
-      const activeCommands = commandMap || CommandPalette._defaultCommands;
-      if (activeCommands) palette.commands = activeCommands;
+      palette.commands = commandMap || CommandPalette._defaultCommands || palette.commands;
       palette.toggle?.();
     }
     return palette;
   }
 }
 
-class ContextMenu extends HTMLElement {
+export class ContextMenu extends BaseElement {
   constructor() {
     super();
     this.table = document.createElement('table');
@@ -261,26 +245,22 @@ class ContextMenu extends HTMLElement {
 
     this.items = [
       { id: 'filter', label: 'Filter', symbol: '', run: () => commands.filter?.run(this.targetCol) },
-      { id: 'sortAsc', label: 'Sort', symbol: 'A<br>Z', run: (event) => commands.sortAscending?.run(event) },
-      { id: 'sortDesc', label: 'Sort', symbol: 'Z<br>A', run: (event) => commands.sortDescending?.run(event) },
-      { id: 'roundInt', label: 'Round', symbol: 'N', run: (event) => commands.integer?.run(event) },
-      { id: 'roundDec', label: 'Round', symbol: '$', run: (event) => commands.decimal?.run(event) },
-      { id: 'insertCol', label: 'Insert', symbol: '&verbar;', run: (event) => commands.insertLeft?.run(event) },
-      { id: 'insertRow', label: 'Insert', symbol: '&horbar;', run: (event) => commands.insertUp?.run(event) },
-      { id: 'deleteCol', label: 'Delete', symbol: '&verbar;', run: (event) => commands.deleteCol?.run(event) },
-      { id: 'deleteRow', label: 'Delete', symbol: '&horbar;', run: (event) => commands.deleteRow?.run(event) },
+      { id: 'sortAsc', label: 'Sort', symbol: 'A<br>Z', run: (e) => commands.sortAscending?.run(e) },
+      { id: 'sortDesc', label: 'Sort', symbol: 'Z<br>A', run: (e) => commands.sortDescending?.run(e) },
+      { id: 'roundInt', label: 'Round', symbol: 'N', run: (e) => commands.integer?.run(e) },
+      { id: 'roundDec', label: 'Round', symbol: '$', run: (e) => commands.decimal?.run(e) },
+      { id: 'insertCol', label: 'Insert', symbol: '&verbar;', run: (e) => commands.insertLeft?.run(e) },
+      { id: 'insertRow', label: 'Insert', symbol: '&horbar;', run: (e) => commands.insertUp?.run(e) },
+      { id: 'deleteCol', label: 'Delete', symbol: '&verbar;', run: (e) => commands.deleteCol?.run(e) },
+      { id: 'deleteRow', label: 'Delete', symbol: '&horbar;', run: (e) => commands.deleteRow?.run(e) },
     ];
 
-    this.addEventListener('mouseout', (event) => {
-      if (!this.contains(event.relatedTarget)) this.hide();
+    this.addEventListener('mouseout', (e) => {
+      if (!this.contains(e.relatedTarget)) this.hide();
     });
   }
 
-  hide() {
-    this.classList.remove('open', 'visible');
-    this.removeAttribute('open');
-    this.style.display = 'none';
-  }
+  hide() { setOpen(this, false); }
 
   ensureInitialized() {
     if (this._menuInitialized) return;
@@ -289,16 +269,10 @@ class ContextMenu extends HTMLElement {
     for (const item of this.items) {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td><div>${item.label}</div></td>${item.symbol ? `<td><div class="cmenu-opt">${item.symbol}</div></td>` : ''}`;
-      tr.addEventListener('click', (event) => {
-        this.hide();
-        item.run(event);
-      });
+      tr.addEventListener('click', (e) => { this.hide(); item.run(e); });
       this.table.appendChild(tr);
     }
-    if (!this.headerEl.parentNode) {
-      this.appendChild(this.headerEl);
-      this.appendChild(this.table);
-    }
+    if (!this.headerEl.parentNode) this.append(this.headerEl, this.table);
   }
 
   connectedCallback() {
@@ -324,14 +298,10 @@ class ContextMenu extends HTMLElement {
     this.rowOffset = targetCell.rowOffset;
 
     const menuWidth = 140, menuHeight = 220;
-    const left = (typeof window !== 'undefined' && event.clientX + menuWidth > window.innerWidth)
-      ? Math.max(0, event.clientX - menuWidth)
-      : event.clientX - 2;
-    const top = (typeof window !== 'undefined' && event.clientY + menuHeight > window.innerHeight)
-      ? Math.max(0, event.clientY - menuHeight)
-      : event.clientY - 2;
-    this.style.left = `${left}px`;
-    this.style.top = `${top}px`;
+    const winW = globalThis.window?.innerWidth || Infinity;
+    const winH = globalThis.window?.innerHeight || Infinity;
+    this.style.left = `${event.clientX + menuWidth > winW ? Math.max(0, event.clientX - menuWidth) : event.clientX - 2}px`;
+    this.style.top = `${event.clientY + menuHeight > winH ? Math.max(0, event.clientY - menuHeight) : event.clientY - 2}px`;
 
     if (this.rowOffset < 0) {
       this.targetCol = this.colOffset + sheet.baseX;
@@ -356,16 +326,12 @@ class ContextMenu extends HTMLElement {
       this.showItems(['roundInt', 'roundDec', 'insertCol', 'insertRow', 'deleteCol', 'deleteRow']);
     }
 
-    this.classList.add('open', 'visible');
-    this.setAttribute('open', '');
-    this.style.display = 'block';
+    setOpen(this, true, 'block');
   }
 }
 
-if (typeof customElements !== 'undefined') {
-  if (!customElements.get('ui-command-palette')) customElements.define('ui-command-palette', CommandPalette);
-  if (!customElements.get('ui-cmenu')) customElements.define('ui-cmenu', ContextMenu);
-}
+defineEl('ui-command-palette', CommandPalette);
+defineEl('ui-cmenu', ContextMenu);
 
 const commands = {
   about: { label: 'About', key: 'H', ctrl: true, run: () => AboutDialog.show(), description: 'About' },
@@ -385,13 +351,6 @@ const commands = {
   undo: { label: 'Undo', key: 'Z', ctrl: true, run: () => getSheet()?.undo(), description: 'Undo' },
   redo: { label: 'Redo', key: 'Z', ctrl: true, shift: true, run: () => getSheet()?.redo(), description: 'Redo' },
   date: { label: "Insert Today's Date", key: ';', ctrl: true, run: () => getSheet()?.insertDate(), description: "Insert today's date" },
-  validateDates: { label: 'Validate: Date Formats (YYYY-MM-DD)', run: () => ValidationPane.run('dates'), description: 'Standardize date formats across columns to YYYY-mm-dd' },
-  validateWhitespace: { label: 'Validate: Trim Whitespace', run: () => ValidationPane.run('trim_whitespace'), description: 'Remove leading and trailing whitespace from cell text' },
-  validateCommaDecimals: { label: 'Validate: Decimal Comma -> Dot', run: () => ValidationPane.run('comma_decimals'), description: 'Convert comma decimals (3,14) to dot notation in numeric fields' },
-  validateLineReturns: { label: 'Validate: Line Returns -> Pipe', run: () => ValidationPane.run('line_returns'), description: 'Replace embedded newline line breaks with pipe character (|)' },
-  validateQuotes: { label: 'Validate: Double Quotes -> Single', run: () => ValidationPane.run('double_quotes'), description: 'Replace double quotation marks (") with single quotes (\')' },
-  validateTextCommas: { label: 'Validate: Text Commas -> Dash', run: () => ValidationPane.run('text_commas'), description: 'Replace commas inside text cells with hyphens (-)' },
-  validateLowercase: { label: 'Validate: Force Lowercase', run: () => ValidationPane.run('lowercase'), description: 'Convert all text cells to lowercase' },
   filter: { label: 'Filter Column', key: 'Q', ctrl: true, run: (col) => getSheet()?.openFilter(col), description: 'Filter sheet rows by column value' },
   find: { label: 'Find & Match', key: 'F', ctrl: true, run: () => getSheet()?.find(false), description: 'Quick find / match' },
   findAdvanced: { label: 'Advanced Find / Replace', key: 'F', ctrl: true, shift: true, run: () => getSheet()?.find(true), description: 'Advanced find / replace' },
@@ -402,7 +361,6 @@ const commands = {
   reloadFile: { label: 'Reload File', icon: 'reload_file', key: 'R', ctrl: true, run: () => getCsvHandle()?.reloadFile(), description: 'Reload file from last save' },
   expand: { label: 'Expand Row', key: 'E', ctrl: true, run: () => getSheet()?.expand(), description: 'Expand first row to selection' },
   validateData: { label: 'Validate Data: Open Pane', icon: 'validate_data', key: 'P', ctrl: true, shift: true, run: () => ValidationPane.toggle(), description: 'Open data validation pane with all validation rules' },
-  validateHeaders: { label: 'Validate: Headers & SQL Compliance', key: 'H', ctrl: true, shift: true, run: () => ValidationPane.run('headers'), description: 'Validate and sanitize column headers for SQL identifier standards and duplicates' },
   nextOccurrence: { label: 'Next Occurrence', key: 'D', ctrl: true, run: () => getSheet()?.goToOccurrence(true), description: 'Go to next occurrence of cell value' },
   prevOccurrence: { label: 'Previous Occurrence', key: 'D', ctrl: true, shift: true, run: () => getSheet()?.goToOccurrence(false), description: 'Go to previous occurrence of cell value' },
   goToCoordinate: { label: 'Go to Coordinate', run: () => startCoordEdit(), description: 'Go to coordinate' },
@@ -423,13 +381,20 @@ const commands = {
   copyJson: { label: 'Copy as JSON', run: () => getCsvHandle()?.copyJson(), description: 'Copy active selection as JSON to clipboard' },
 };
 
+for (const r of VALIDATION_RULES) {
+  commands[r.cmdId] = {
+    label: r.cmdLabel,
+    key: r.key,
+    ctrl: r.ctrl,
+    shift: r.shift,
+    run: () => ValidationPane.run(r.id),
+    description: r.description
+  };
+}
+
 CommandPalette.setDefaultCommands(commands);
 
-let activeKeyDownHandler = null;
-let activeKeyUpHandler = null;
-let activeCopyHandler = null;
-let activeCutHandler = null;
-let activePasteHandler = null;
+let activeHandlers = null;
 let shortcutMap = null;
 
 function getShortcutKey(key, ctrl, shift, alt) {
@@ -439,12 +404,12 @@ function getShortcutKey(key, ctrl, shift, alt) {
 function getShortcutMap() {
   if (!shortcutMap) {
     shortcutMap = new Map();
-    for (const command of Object.values(commands)) {
-      if (!command.key || typeof command.run !== 'function') continue;
-      const keyUpper = String(command.key).toUpperCase();
-      const ctrl = Boolean(command.ctrl), shift = Boolean(command.shift), alt = Boolean(command.alt);
-      shortcutMap.set(getShortcutKey(keyUpper, ctrl, shift, alt), command);
-      if (command.key !== keyUpper) shortcutMap.set(getShortcutKey(command.key, ctrl, shift, alt), command);
+    for (const cmd of Object.values(commands)) {
+      if (!cmd.key || typeof cmd.run !== 'function') continue;
+      const keyUpper = String(cmd.key).toUpperCase();
+      const ctrl = Boolean(cmd.ctrl), shift = Boolean(cmd.shift), alt = Boolean(cmd.alt);
+      shortcutMap.set(getShortcutKey(keyUpper, ctrl, shift, alt), cmd);
+      if (cmd.key !== keyUpper) shortcutMap.set(getShortcutKey(cmd.key, ctrl, shift, alt), cmd);
     }
     if (commands.delete) shortcutMap.set(getShortcutKey('DELETE', false, false, false), commands.delete);
     if (commands.redo) shortcutMap.set(getShortcutKey('Y', true, false, false), commands.redo);
@@ -463,223 +428,127 @@ const isInputElement = (el) =>
 
 export function buildKeys() {
   shortcutMap = null;
-  if (typeof document !== 'undefined') {
-    if (activeKeyDownHandler) document.removeEventListener('keydown', activeKeyDownHandler);
-    if (activeKeyUpHandler) document.removeEventListener('keyup', activeKeyUpHandler);
-    if (activeCopyHandler) document.removeEventListener('copy', activeCopyHandler);
-    if (activeCutHandler) document.removeEventListener('cut', activeCutHandler);
-    if (activePasteHandler) document.removeEventListener('paste', activePasteHandler);
+  const doc = globalThis.document;
+  if (!doc) return;
+
+  if (activeHandlers) {
+    for (const [evt, fn] of Object.entries(activeHandlers)) doc.removeEventListener(evt, fn);
   }
 
-  activeKeyDownHandler = (event) => {
-    let key = event.key.toUpperCase();
-    const ctrlDown = event.metaKey || event.ctrlKey;
-    const alt = event.altKey;
-    const shift = event.shiftKey;
-    const activeSheet = getSheet();
-
-    const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
-    const isCellInput = Boolean(activeSheet?.isEditing && activeEl === activeSheet.inputField);
-    const inCommandPalette = Boolean(
-      activeEl?.closest?.('ui-command-palette') ||
-      dom?.palette?.isOpen ||
-      (typeof document !== 'undefined' && document.querySelector('ui-command-palette')?.isOpen)
-    );
-    const inDialog = Boolean(DialogManager.isBusy);
-    const inFinder = Boolean(activeEl?.closest?.('ui-finder'));
-    const inFilter = Boolean(activeEl?.closest?.('ui-filter'));
-    const validationPane = dom?.validationPane || (typeof document !== 'undefined' ? (document.getElementById('validation-pane') || document.querySelector('ui-validation-pane')) : null);
-    const inValidationPane = Boolean(validationPane?.isOpen);
-    const isOtherInput = isInputElement(activeEl) && !isCellInput;
-
-    if (ctrlDown && (PREVENT_DEFAULT_KEYS.has(key) || PREVENT_DEFAULT_KEYS.has(event.key))) {
-      if (!(isOtherInput || isCellInput) || (key !== 'C' && key !== 'V' && key !== 'X' && key !== 'A' && key !== 'Z')) {
-        event.preventDefault();
-      }
-    }
-
-    if (inCommandPalette) {
-      if (key === 'ESCAPE') {
-        (document.getElementById('palette') || document.querySelector('ui-command-palette'))?.close?.();
-      }
-      return;
-    }
-
-    if (ctrlDown && (key === 'P' || key === 'K') && !shift && !alt) {
-      event.preventDefault();
-      if (commands.shortcuts?.run) commands.shortcuts.run();
-      else (document.getElementById('palette') || document.querySelector('ui-command-palette'))?.toggle?.();
-      return;
-    }
-
-    if (inDialog) {
-      if (key === 'ESCAPE') { event.preventDefault(); DialogManager.close(); }
-      return;
-    }
-
-    if (inFinder) {
-      if (key === 'ESCAPE') { event.preventDefault(); activeEl.closest('ui-finder')?.close?.(); }
-      else if (ctrlDown && key === 'F') { event.preventDefault(); activeSheet?.find(shift); }
-      return;
-    }
-
-    if (inFilter) {
-      if (key === 'ESCAPE' || (ctrlDown && key === 'Q')) { event.preventDefault(); activeEl.closest('ui-filter')?.close?.(); }
-      return;
-    }
-
-    if (inValidationPane && key === 'ESCAPE' && !isCellInput) {
-      event.preventDefault();
-      validationPane.handleBack?.();
-      return;
-    }
-
-    if (isOtherInput) return;
-
-    if (isCellInput) {
-      if (ctrlDown && (key === 'S' || key === 'O' || key === 'Q')) {
-        event.preventDefault();
-        if (key === 'S') (shift ? commands.saveAs : commands.save).run();
-        else if (key === 'O') commands.open.run();
-        else if (key === 'Q') commands.filter.run();
-      }
-      return;
-    }
-
-    const isBoundaryKey = key === 'ARROWUP' || key === 'ARROWDOWN' || key === 'ARROWLEFT' || key === 'ARROWRIGHT' ||
-                          key === 'HOME' || key === 'END' || key === 'PAGEUP' || key === 'PAGEDOWN';
-    if (activeSheet) {
-      activeSheet.isSelectingRange = shift && !alt && !event.metaKey && isBoundaryKey;
-    }
-
-    if ((alt && key === 'TAB') || (ctrlDown && (key === 'C' || key === 'V'))) return;
-    if (key === 'TAB') event.preventDefault();
-    if (event.code === 'Space') key = 'SPACE';
-
-    if (activeSheet) {
-      const pageSize = settings?.rows || 10;
-      const maxX = Math.max(0, activeSheet.df.width - 1);
-      const maxY = Math.max(0, activeSheet.rowCount - 1);
-
-      if (key === 'PAGEUP') {
-        event.preventDefault();
-        activeSheet.y = Math.max(0, activeSheet.y - pageSize);
-        return activeSheet.refreshSelection();
-      }
-      if (key === 'PAGEDOWN') {
-        event.preventDefault();
-        activeSheet.y = Math.min(maxY, activeSheet.y + pageSize);
-        return activeSheet.refreshSelection();
-      }
-      if (key === 'HOME') {
-        event.preventDefault();
-        activeSheet.x = 0;
-        if (ctrlDown) activeSheet.y = 0;
-        return activeSheet.refreshSelection();
-      }
-      if (key === 'END' && ctrlDown) {
-        event.preventDefault();
-        activeSheet.x = maxX;
-        activeSheet.y = maxY;
-        return activeSheet.refreshSelection();
-      }
-      if (key === 'F2') {
-        event.preventDefault();
-        if (!activeSheet.df?.lock) activeSheet.startEdit();
-        return;
-      }
-      if (ctrlDown) {
-        if (key === 'ARROWUP') { event.preventDefault(); activeSheet.y = 0; return activeSheet.refreshSelection(); }
-        if (key === 'ARROWRIGHT') { event.preventDefault(); activeSheet.x = maxX; return activeSheet.refreshSelection(); }
-        if (key === 'ARROWDOWN') { event.preventDefault(); activeSheet.y = maxY; return activeSheet.refreshSelection(); }
-        if (key === 'ARROWLEFT') { event.preventDefault(); activeSheet.x = 0; return activeSheet.refreshSelection(); }
-      }
-    }
-
-    const map = getShortcutMap();
-    const matchedCmd = map.get(getShortcutKey(key, ctrlDown, shift, alt)) ||
-                       map.get(getShortcutKey(event.key, ctrlDown, shift, alt));
-    if (matchedCmd) {
-      matchedCmd.run();
-      return event.preventDefault();
-    }
-
-    if (event.key.length === 1 && !ctrlDown && !event.metaKey && !alt && activeSheet) {
-      if (activeSheet.df?.lock) return;
-      event.preventDefault();
-      return activeSheet.startEdit(event.key);
-    }
-
-    if (activeSheet) {
-      switch (key) {
-        case 'ARROWUP': event.preventDefault(); activeSheet.y--; activeSheet.refreshSelection(); return;
-        case 'ARROWDOWN': event.preventDefault(); activeSheet.y++; activeSheet.refreshSelection(); return;
-        case 'ARROWLEFT': event.preventDefault(); activeSheet.x--; activeSheet.refreshSelection(); return;
-        case 'ARROWRIGHT': event.preventDefault(); activeSheet.x++; activeSheet.refreshSelection(); return;
-        case 'TAB':
-          event.preventDefault();
-          activeSheet.isSelectingRange = false;
-          activeSheet.rangeEnd = undefined;
-          activeSheet.x += shift ? -1 : 1;
-          activeSheet.refreshSelection();
-          return;
-        case 'ENTER':
-          event.preventDefault();
-          if (!activeSheet.df?.lock) activeSheet.startEdit();
-          return;
-        case 'BACKSPACE':
-        case 'DELETE':
-          event.preventDefault();
-          if (!activeSheet.df?.lock) {
-            activeSheet.editSelection('');
-            activeSheet.refresh();
-          }
-          return;
-      }
-    }
-  };
-
-  activeKeyUpHandler = (event) => {
-    const key = event.key.toUpperCase();
-    const activeSheet = getSheet();
-    if (activeSheet && (key === 'CONTROL' || key === 'SHIFT') && !event.shiftKey) {
-      activeSheet.isSelectingRange = false;
-    }
-  };
-
   const getClipboardSheet = (requireUnlocked = false) => {
-    if (isInputElement(document.activeElement)) return null;
+    if (isInputElement(doc.activeElement)) return null;
     const sheet = getSheet();
     return (!sheet || (requireUnlocked && sheet.df?.lock)) ? null : sheet;
   };
 
-  activeCopyHandler = (event) => {
-    const sheet = getClipboardSheet(false);
-    if (!sheet) return;
-    event.preventDefault();
-    event.clipboardData?.setData('text/plain', sheet.copySelection());
+  activeHandlers = {
+    keydown: (event) => {
+      let key = event.key.toUpperCase();
+      const ctrlDown = event.metaKey || event.ctrlKey;
+      const alt = event.altKey, shift = event.shiftKey;
+      const activeSheet = getSheet();
+      const activeEl = doc.activeElement;
+      const isCellInput = Boolean(activeSheet?.isEditing && activeEl === activeSheet.inputField);
+      const isOtherInput = isInputElement(activeEl) && !isCellInput;
+
+      if (ctrlDown && (PREVENT_DEFAULT_KEYS.has(key) || PREVENT_DEFAULT_KEYS.has(event.key))) {
+        if (!(isOtherInput || isCellInput) || (key !== 'C' && key !== 'V' && key !== 'X' && key !== 'A' && key !== 'Z')) {
+          event.preventDefault();
+        }
+      }
+
+      const palette = dom?.palette || doc.getElementById('palette') || doc.querySelector('ui-command-palette');
+      if (activeEl?.closest?.('ui-command-palette') || palette?.isOpen) {
+        if (key === 'ESCAPE') palette?.close?.();
+        return;
+      }
+
+      if (ctrlDown && (key === 'P' || key === 'K') && !shift && !alt) {
+        event.preventDefault();
+        return commands.shortcuts?.run ? commands.shortcuts.run() : palette?.toggle?.();
+      }
+
+      if (DialogManager.isBusy) {
+        if (key === 'ESCAPE') { event.preventDefault(); DialogManager.close(); }
+        return;
+      }
+
+      if (activeEl?.closest?.('ui-finder')) {
+        if (key === 'ESCAPE') { event.preventDefault(); activeEl.closest('ui-finder')?.close?.(); }
+        else if (ctrlDown && key === 'F') { event.preventDefault(); activeSheet?.find(shift); }
+        return;
+      }
+
+      if (activeEl?.closest?.('ui-filter')) {
+        if (key === 'ESCAPE' || (ctrlDown && key === 'Q')) { event.preventDefault(); activeEl.closest('ui-filter')?.close?.(); }
+        return;
+      }
+
+      const validationPane = dom?.validationPane || ValidationPane.getInstance();
+      if (validationPane?.isOpen && key === 'ESCAPE' && !isCellInput) {
+        event.preventDefault();
+        validationPane.handleBack?.();
+        return;
+      }
+
+      if (isOtherInput) return;
+
+      if (isCellInput) {
+        if (ctrlDown && (key === 'S' || key === 'O' || key === 'Q')) {
+          event.preventDefault();
+          if (key === 'S') (shift ? commands.saveAs : commands.save).run();
+          else if (key === 'O') commands.open.run();
+          else if (key === 'Q') commands.filter.run();
+        }
+        return;
+      }
+
+      const isBoundaryKey = key.startsWith('ARROW') || key === 'HOME' || key === 'END' || key === 'PAGEUP' || key === 'PAGEDOWN';
+      if (activeSheet) activeSheet.isSelectingRange = shift && !alt && !event.metaKey && isBoundaryKey;
+
+      if ((alt && key === 'TAB') || (ctrlDown && (key === 'C' || key === 'V'))) return;
+      if (key === 'TAB') event.preventDefault();
+      if (event.code === 'Space') key = 'SPACE';
+
+      const map = getShortcutMap();
+      const matchedCmd = map.get(getShortcutKey(key, ctrlDown, shift, alt)) || map.get(getShortcutKey(event.key, ctrlDown, shift, alt));
+      if (matchedCmd) {
+        matchedCmd.run();
+        return event.preventDefault();
+      }
+
+      activeSheet?.handleKeyDown(event, key, ctrlDown, shift, alt);
+    },
+
+    keyup: (event) => {
+      const key = event.key.toUpperCase();
+      const activeSheet = getSheet();
+      if (activeSheet && (key === 'CONTROL' || key === 'SHIFT') && !event.shiftKey) {
+        activeSheet.isSelectingRange = false;
+      }
+    },
+
+    copy: (event) => {
+      const sheet = getClipboardSheet(false);
+      if (sheet) { event.preventDefault(); event.clipboardData?.setData('text/plain', sheet.copySelection()); }
+    },
+
+    cut: (event) => {
+      const sheet = getClipboardSheet(true);
+      if (sheet) { event.preventDefault(); event.clipboardData?.setData('text/plain', sheet.cutSelection()); }
+    },
+
+    paste: (event) => {
+      const sheet = getClipboardSheet(true);
+      if (sheet) {
+        event.preventDefault();
+        const rawText = event.clipboardData?.getData('text');
+        if (rawText) sheet.pasteText(rawText);
+      }
+    }
   };
 
-  activeCutHandler = (event) => {
-    const sheet = getClipboardSheet(true);
-    if (!sheet) return;
-    event.preventDefault();
-    event.clipboardData?.setData('text/plain', sheet.cutSelection());
-  };
-
-  activePasteHandler = (event) => {
-    const sheet = getClipboardSheet(true);
-    if (!sheet) return;
-    event.preventDefault();
-    const rawText = event.clipboardData?.getData('text');
-    if (rawText) sheet.pasteText(rawText);
-  };
-
-  document.addEventListener('keydown', activeKeyDownHandler);
-  document.addEventListener('keyup', activeKeyUpHandler);
-  document.addEventListener('copy', activeCopyHandler);
-  document.addEventListener('cut', activeCutHandler);
-  document.addEventListener('paste', activePasteHandler);
+  for (const [evt, fn] of Object.entries(activeHandlers)) doc.addEventListener(evt, fn);
 }
 
-export { commands, formatShortcut, CommandPalette, ContextMenu };
+export { commands, formatShortcut };

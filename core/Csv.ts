@@ -33,37 +33,37 @@ export const DEFAULT_CSV_DIALECT: CsvDialect = {
   commentChar: ''
 };
 
+function resolveDialect(base: CsvDialect, override?: Partial<CsvDialect>): CsvDialect {
+  if (!override) return base;
+  const merged = { ...base, ...override };
+  return merged.delimiter === 'TAB' ? { ...merged, delimiter: '\t' } : merged;
+}
+
+const unescapeChar = (ch: string) =>
+  ch === 'n' ? '\n' : ch === 'r' ? '\r' : ch === 't' ? '\t' : ch;
+
 export class SeparatorDetector {
   private static readonly CANDIDATES = [',', '\t', ';', '|'];
   private static readonly SAMPLE_LIMIT = 2000;
 
   static detect(sample: string, candidates: readonly string[] = SeparatorDetector.CANDIDATES): string {
-    if (!sample || typeof sample !== 'string' || sample.length === 0) return ',';
-    const text = sample.length > SeparatorDetector.SAMPLE_LIMIT
-      ? sample.substring(0, SeparatorDetector.SAMPLE_LIMIT)
-      : sample;
-
+    if (!sample || typeof sample !== 'string') return ',';
+    const text = sample.length > SeparatorDetector.SAMPLE_LIMIT ? sample.slice(0, SeparatorDetector.SAMPLE_LIMIT) : sample;
     const counts = new Array<number>(candidates.length).fill(0);
     let inQuotes = false;
-    const len = text.length;
 
-    for (let i = 0; i < len; i++) {
+    for (let i = 0, len = text.length; i < len; i++) {
       const char = text[i];
       if (char === '"') {
         if (inQuotes && i + 1 < len && text[i + 1] === '"') i++;
         else inQuotes = !inQuotes;
       } else if (!inQuotes) {
-        for (let j = 0; j < candidates.length; j++) {
-          if (char === candidates[j]) {
-            counts[j]++;
-            break;
-          }
-        }
+        const idx = candidates.indexOf(char);
+        if (idx !== -1) counts[idx]++;
       }
     }
 
-    let maxCount = 0;
-    let dominantIndex = 0;
+    let maxCount = 0, dominantIndex = 0;
     for (let j = 0; j < counts.length; j++) {
       if (counts[j] > maxCount) {
         maxCount = counts[j];
@@ -80,10 +80,7 @@ export class CsvParser {
   private textDecoder: TextDecoder | null = null;
 
   constructor(dialect?: Partial<CsvDialect>) {
-    this.dialect = { ...DEFAULT_CSV_DIALECT, ...dialect };
-    if (this.dialect.delimiter === 'TAB') {
-      this.dialect = { ...this.dialect, delimiter: '\t' };
-    }
+    this.dialect = resolveDialect(DEFAULT_CSV_DIALECT, dialect);
   }
 
   reset(): void {
@@ -100,41 +97,37 @@ export class CsvParser {
       textChunk = chunk;
     }
 
-    let textToProcess = this.buffer + textChunk;
-    if (this.buffer === '' && textToProcess.charCodeAt(0) === 0xFEFF) {
-      textToProcess = textToProcess.slice(1);
-    }
-    const len = textToProcess.length;
-    const sep = this.dialect.delimiter;
-    const quote = this.dialect.quoteChar;
+    let text = this.buffer + textChunk;
+    if (this.buffer === '' && text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+    const len = text.length;
+    const { delimiter: sep, quoteChar: quote, commentChar = '', trimUnquotedWhitespace: trimUnquoted = false } = this.dialect;
     const isBackslashEscape = (this.dialect.escapeChar ?? '"') === '\\';
-    const commentChar = this.dialect.commentChar ?? '';
-    const trimUnquoted = this.dialect.trimUnquotedWhitespace ?? false;
 
     let parsedRows: string[][] = [];
-    let i = 0;
-    let inQuotes = false;
-    let cellWasQuoted = false;
-    let quoteClosed = false;
-    let currentCell = '';
-    let currentRow: string[] = [];
-    let lastSafeIndex = 0;
-    let segmentStart = 0;
+    let i = 0, inQuotes = false, cellWasQuoted = false, quoteClosed = false;
+    let currentCell = '', currentRow: string[] = [];
+    let lastSafeIndex = 0, segmentStart = 0;
 
-    const unescapeChar = (ch: string) =>
-      ch === 'n' ? '\n' : ch === 'r' ? '\r' : ch === 't' ? '\t' : ch;
+    const flushCell = (stripCr = false) => {
+      if (i > segmentStart) currentCell += text.slice(segmentStart, i);
+      if (stripCr && currentCell.endsWith('\r')) currentCell = currentCell.slice(0, -1);
+      currentRow.push((!cellWasQuoted && trimUnquoted) ? currentCell.trim() : currentCell);
+      currentCell = '';
+      cellWasQuoted = quoteClosed = false;
+    };
 
     while (i < len) {
-      const c = textToProcess[i];
+      const c = text[i];
 
       if (commentChar && !inQuotes && currentRow.length === 0 && currentCell === '') {
         let checkIdx = i;
-        while (checkIdx < len && (textToProcess[checkIdx] === ' ' || textToProcess[checkIdx] === '\t')) checkIdx++;
-        if (checkIdx < len && textToProcess.startsWith(commentChar, checkIdx)) {
+        while (checkIdx < len && (text[checkIdx] === ' ' || text[checkIdx] === '\t')) checkIdx++;
+        if (checkIdx < len && text.startsWith(commentChar, checkIdx)) {
           i = checkIdx;
-          while (i < len && textToProcess[i] !== '\n' && textToProcess[i] !== '\r') i++;
+          while (i < len && text[i] !== '\n' && text[i] !== '\r') i++;
           if (i < len) {
-            i += (textToProcess[i] === '\r' && i + 1 < len && textToProcess[i + 1] === '\n') ? 2 : 1;
+            i += (text[i] === '\r' && i + 1 < len && text[i + 1] === '\n') ? 2 : 1;
             lastSafeIndex = segmentStart = i;
           } else {
             if (!isLastChunk) break;
@@ -147,26 +140,17 @@ export class CsvParser {
       if (inQuotes) {
         if (isBackslashEscape && c === '\\') {
           if (i + 1 < len) {
-            if (i > segmentStart) currentCell += textToProcess.slice(segmentStart, i);
-            currentCell += unescapeChar(textToProcess[i + 1]);
+            if (i > segmentStart) currentCell += text.slice(segmentStart, i);
+            currentCell += unescapeChar(text[i + 1]);
             segmentStart = i += 2;
-          } else if (isLastChunk) {
-            i++;
-          } else {
-            break;
-          }
+          } else if (isLastChunk) i++;
+          else break;
         } else if (c === quote) {
-          if (i > segmentStart) currentCell += textToProcess.slice(segmentStart, i);
-          if (i + 1 < len) {
-            if (textToProcess[i + 1] === quote) {
-              currentCell += quote;
-              segmentStart = i += 2;
-            } else {
-              inQuotes = false;
-              cellWasQuoted = quoteClosed = true;
-              segmentStart = ++i;
-            }
-          } else if (isLastChunk) {
+          if (i > segmentStart) currentCell += text.slice(segmentStart, i);
+          if (i + 1 < len && text[i + 1] === quote) {
+            currentCell += quote;
+            segmentStart = i += 2;
+          } else if (i + 1 < len || isLastChunk) {
             inQuotes = false;
             cellWasQuoted = quoteClosed = true;
             segmentStart = ++i;
@@ -176,66 +160,51 @@ export class CsvParser {
         } else {
           i++;
         }
+      } else if (isBackslashEscape && c === '\\') {
+        if (i + 1 < len) {
+          const next = text[i + 1];
+          if (next === sep || next === quote || next === '\\' || next === 'n' || next === 'r' || next === 't') {
+            if (i > segmentStart) currentCell += text.slice(segmentStart, i);
+            currentCell += unescapeChar(next);
+            segmentStart = i += 2;
+          } else i++;
+        } else if (isLastChunk) i++;
+        else break;
+      } else if (c === quote) {
+        if (i > segmentStart) currentCell += text.slice(segmentStart, i);
+        if (trimUnquoted && currentCell.trim() === '') currentCell = '';
+        inQuotes = cellWasQuoted = true;
+        quoteClosed = false;
+        segmentStart = ++i;
+      } else if (quoteClosed && trimUnquoted && (c === ' ' || c === '\t')) {
+        segmentStart = ++i;
+      } else if (c === sep) {
+        flushCell(false);
+        segmentStart = ++i;
+      } else if (c === '\n' || c === '\r') {
+        if (c === '\r' && i + 1 >= len && !isLastChunk) break;
+        flushCell(true);
+        parsedRows.push(currentRow);
+        currentRow = [];
+        i += (c === '\r' && i + 1 < len && text[i + 1] === '\n') ? 2 : 1;
+        lastSafeIndex = segmentStart = i;
       } else {
-        if (isBackslashEscape && c === '\\') {
-          if (i + 1 < len) {
-            const next = textToProcess[i + 1];
-            if (next === sep || next === quote || next === '\\' || next === 'n' || next === 'r' || next === 't') {
-              if (i > segmentStart) currentCell += textToProcess.slice(segmentStart, i);
-              currentCell += unescapeChar(next);
-              segmentStart = i += 2;
-            } else {
-              i++;
-            }
-          } else if (isLastChunk) {
-            i++;
-          } else {
-            break;
-          }
-        } else if (c === quote) {
-          if (i > segmentStart) currentCell += textToProcess.slice(segmentStart, i);
-          if (trimUnquoted && currentCell.trim() === '') currentCell = '';
-          inQuotes = cellWasQuoted = true;
-          quoteClosed = false;
-          segmentStart = ++i;
-        } else if (quoteClosed && trimUnquoted && (c === ' ' || c === '\t')) {
-          segmentStart = ++i;
-        } else if (c === sep) {
-          if (i > segmentStart) currentCell += textToProcess.slice(segmentStart, i);
-          currentRow.push((!cellWasQuoted && trimUnquoted) ? currentCell.trim() : currentCell);
-          currentCell = '';
-          cellWasQuoted = quoteClosed = false;
-          segmentStart = ++i;
-        } else if (c === '\n' || c === '\r') {
-          if (c === '\r' && i + 1 >= len && !isLastChunk) break;
-          if (i > segmentStart) currentCell += textToProcess.slice(segmentStart, i);
-          if (currentCell.endsWith('\r')) currentCell = currentCell.slice(0, -1);
-          currentRow.push((!cellWasQuoted && trimUnquoted) ? currentCell.trim() : currentCell);
-          currentCell = '';
-          cellWasQuoted = quoteClosed = false;
-          parsedRows.push(currentRow);
-          currentRow = [];
-          i += (c === '\r' && i + 1 < len && textToProcess[i + 1] === '\n') ? 2 : 1;
-          lastSafeIndex = segmentStart = i;
-        } else {
-          i++;
-        }
+        i++;
       }
     }
 
-    if (i > segmentStart) currentCell += textToProcess.slice(segmentStart, i);
+    if (i > segmentStart) currentCell += text.slice(segmentStart, i);
 
     if (!isLastChunk) {
-      if (lastSafeIndex > 0) {
-        this.buffer = textToProcess.slice(lastSafeIndex);
-      } else {
-        this.buffer = textToProcess;
+      if (lastSafeIndex > 0) this.buffer = text.slice(lastSafeIndex);
+      else {
+        this.buffer = text;
         parsedRows = [];
       }
     } else {
       if (cellWasQuoted || currentCell.length > 0 || currentRow.length > 0) {
-        if (currentCell.endsWith('\r')) currentCell = currentCell.slice(0, -1);
-        currentRow.push((!cellWasQuoted && trimUnquoted) ? currentCell.trim() : currentCell);
+        segmentStart = i;
+        flushCell(true);
         parsedRows.push(currentRow);
       }
       this.reset();
@@ -245,10 +214,7 @@ export class CsvParser {
   }
 
   parse(input: string | Uint8Array, dialect?: Partial<CsvDialect>): string[][] {
-    if (dialect) {
-      const delimiter = dialect.delimiter === 'TAB' ? '\t' : (dialect.delimiter ?? this.dialect.delimiter);
-      this.dialect = { ...this.dialect, ...dialect, delimiter };
-    }
+    this.dialect = resolveDialect(this.dialect, dialect);
     this.reset();
     return this.parseChunk(input, true);
   }
@@ -258,49 +224,37 @@ export class CsvSerializer {
   private dialect: CsvDialect;
 
   constructor(dialect?: Partial<CsvDialect>) {
-    this.dialect = { ...DEFAULT_CSV_DIALECT, ...dialect };
-    if (this.dialect.delimiter === 'TAB') {
-      this.dialect = { ...this.dialect, delimiter: '\t' };
-    }
+    this.dialect = resolveDialect(DEFAULT_CSV_DIALECT, dialect);
   }
 
   serialize(matrix: readonly (readonly CellValue[])[], dialect?: Partial<CsvDialect>): string {
-    const opts = dialect ? { ...this.dialect, ...dialect } : this.dialect;
-    const sep = opts.delimiter === 'TAB' ? '\t' : opts.delimiter;
+    const opts = resolveDialect(this.dialect, dialect);
+    const sep = opts.delimiter;
     const fw = opts.fixedWidth ?? 0;
     const spaces = fw > 0 ? ' '.repeat(fw) : '';
     const isStrict = opts.isStrict;
     const lineTerm = opts.lineTerminator ?? '\r\n';
-    const escapeChar = opts.escapeChar ?? '"';
+    const isBackslash = (opts.escapeChar ?? '"') === '\\';
 
-    return matrix.map(row => {
-      const outputRow = row.map(val => {
-        let cellStr = normalizeCellValue(val);
-        let requiresQuote = opts.quoteAlways ?? false;
+    return matrix.map(row => row.map(val => {
+      let cellStr = normalizeCellValue(val);
+      let requiresQuote = opts.quoteAlways ?? false;
 
-        if (escapeChar === '\\') {
-          if (cellStr.includes('\\')) cellStr = cellStr.replaceAll('\\', '\\\\');
-          if (cellStr.includes('"')) {
-            requiresQuote = true;
-            cellStr = cellStr.replaceAll('"', '\\"');
-          }
-        } else if (cellStr.includes('"')) {
-          requiresQuote = true;
-          cellStr = cellStr.replaceAll('"', '""');
-        }
-
-        if (!requiresQuote && (cellStr.includes(sep) || cellStr.includes('\n') || cellStr.includes('\r'))) {
-          requiresQuote = true;
-        }
-        if (requiresQuote && isStrict) {
-          throw new Error('Strict csv format not respected: save aborted');
-        }
-        if (requiresQuote) cellStr = `"${cellStr}"`;
-        if (fw > cellStr.length) cellStr = (spaces + cellStr).slice(-fw);
-        return cellStr;
-      });
-      return outputRow.join(sep);
-    }).join(lineTerm);
+      if (isBackslash && cellStr.includes('\\')) cellStr = cellStr.replaceAll('\\', '\\\\');
+      if (cellStr.includes('"')) {
+        requiresQuote = true;
+        cellStr = cellStr.replaceAll('"', isBackslash ? '\\"' : '""');
+      }
+      if (!requiresQuote && (cellStr.includes(sep) || cellStr.includes('\n') || cellStr.includes('\r'))) {
+        requiresQuote = true;
+      }
+      if (requiresQuote && isStrict) {
+        throw new Error('Strict csv format not respected: save aborted');
+      }
+      if (requiresQuote) cellStr = `"${cellStr}"`;
+      if (fw > cellStr.length) cellStr = (spaces + cellStr).slice(-fw);
+      return cellStr;
+    }).join(sep)).join(lineTerm);
   }
 
   serializeJson(matrix: readonly (readonly CellValue[])[], options?: { hasHeader?: boolean; pretty?: boolean }): string {
@@ -322,9 +276,7 @@ export class CsvSerializer {
 
     const records = matrix.slice(1).map(row => {
       const record: Record<string, string> = {};
-      for (let c = 0; c < headers.length; c++) {
-        record[headers[c]] = normalizeCellValue(row[c]);
-      }
+      for (let c = 0; c < headers.length; c++) record[headers[c]] = normalizeCellValue(row[c]);
       return record;
     });
 
@@ -353,8 +305,7 @@ export class CsvSerializer {
 
     for (let r = headerRow ? 1 : 0; r < matrix.length; r++) {
       const row = matrix[r];
-      const cells = Array.from({ length: colCount }, (_, c) => ` ${formatCell(row[c])} `);
-      lines.push(`|${cells.join('|')}|`);
+      lines.push(`|${Array.from({ length: colCount }, (_, c) => ` ${formatCell(row[c])} `).join('|')}|`);
     }
     return lines.join('\n');
   }

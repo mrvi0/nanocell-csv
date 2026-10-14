@@ -5,10 +5,14 @@ import { Notification, showBrowserCompatibilityNotice } from './Notification.js'
 import { Sheet } from './Sheet.js';
 import CsvWorker from './csvWorker.js?worker';
 
-class CsvHandle {
+export class CsvHandle {
+  static pickerOptions = {
+    types: [{ description: 'csv (Comma Separated Value) ', accept: { 'text/csv': ['.csv', '.tsv'] } }]
+  };
+
   constructor(options = {}) {
-    this.win = options.window !== undefined ? options.window : (typeof window !== 'undefined' ? window : null);
-    this.doc = options.document !== undefined ? options.document : (typeof document !== 'undefined' ? document : null);
+    this.win = options.window !== undefined ? options.window : (globalThis.window ?? null);
+    this.doc = options.document !== undefined ? options.document : (globalThis.document ?? null);
     this.createSheet = options.createSheet || ((df) => new Sheet(df));
     this.handle = null;
     this.file = null;
@@ -29,7 +33,6 @@ class CsvHandle {
     this.handle = handle;
     this.file = file;
     if (this.doc) this.doc.title = file.name || 'csv';
-    console.log('Loading : ', file.name);
     this.read(file);
   }
 
@@ -37,8 +40,7 @@ class CsvHandle {
     if (!handle || typeof handle.getFile !== 'function' || this._launchingHandle === handle) return;
     this._launchingHandle = handle;
     try {
-      const file = await handle.getFile();
-      this.loadFile(file, handle);
+      this.loadFile(await handle.getFile(), handle);
     } finally {
       this._launchingHandle = null;
     }
@@ -68,18 +70,16 @@ class CsvHandle {
       });
 
       const preventDefault = (event) => event.preventDefault();
-      win.addEventListener('dragover', preventDefault);
-      win.addEventListener('dragenter', preventDefault);
-      win.addEventListener('dragleave', preventDefault);
+      for (const evt of ['dragover', 'dragenter', 'dragleave']) win.addEventListener(evt, preventDefault);
+
       win.addEventListener('drop', async (event) => {
         event.preventDefault();
         const item = event.dataTransfer?.items?.[0];
-        if (item && typeof item.getAsFileSystemHandle === 'function') {
+        if (typeof item?.getAsFileSystemHandle === 'function') {
           try {
             const handle = await item.getAsFileSystemHandle();
             if (handle && (handle.kind === 'file' || typeof handle.getFile === 'function')) {
-              await this.launchFile(handle);
-              return;
+              return await this.launchFile(handle);
             }
           } catch {}
         }
@@ -143,22 +143,13 @@ class CsvHandle {
 
     if (!file || file.size == 0) {
       this.onChunkLoaded({
-        cmd: 'chunk_loaded',
-        readId: currentReadId,
-        status: 1.0,
-        chunk: [[]],
-        chunkId: 1,
-        isFirstChunk: true,
-        isComplete: true,
-        viewOnly: this.viewOnly
+        cmd: 'chunk_loaded', readId: currentReadId, status: 1.0, chunk: [[]],
+        chunkId: 1, isFirstChunk: true, isComplete: true, viewOnly: this.viewOnly
       });
     } else {
       this.postToWorker('read', {
-        readId: currentReadId,
-        file,
-        viewOnly: this.viewOnly,
-        previewChunks: settings.previewChunks,
-        previewRows: settings.previewRows,
+        readId: currentReadId, file, viewOnly: this.viewOnly,
+        previewChunks: settings.previewChunks, previewRows: settings.previewRows,
         trimUnquoted: Boolean(settings.trimUnquoted)
       });
     }
@@ -184,34 +175,40 @@ class CsvHandle {
     input.click?.();
   }
 
-  async open() {
+  async _withPicker(method, onPicked, onFallback) {
     const win = this.win;
-    if (typeof win?.showOpenFilePicker !== 'function') {
+    if (typeof win?.[method] !== 'function') {
       showBrowserCompatibilityNotice();
-      return this.openFallback();
+      return onFallback();
     }
     try {
-      const [fileHandle] = await win.showOpenFilePicker(CsvHandle.pickerOptions);
-      const newWindow = typeof win.open === 'function' ? win.open('./home.html', '_blank', 'width=800,height=600') : null;
-      if (!newWindow) return await this.launchFile(fileHandle);
-
-      const sendHandle = () => { try { newWindow.postMessage({ fileHandle }, '*'); } catch {} };
-      const onReadyMessage = (event) => {
-        if (event?.data?.type === 'nanocell:ready' && (!event.source || event.source === newWindow)) {
-          win.removeEventListener?.('message', onReadyMessage);
-          sendHandle();
-        }
-      };
-      win.addEventListener?.('message', onReadyMessage);
-      newWindow.onload = sendHandle;
+      return await onPicked(await win[method](CsvHandle.pickerOptions));
     } catch (err) {
-      if (err.name === 'AbortError') return;
-      if (err instanceof TypeError || typeof win.showOpenFilePicker !== 'function') {
+      if (err?.name === 'AbortError') return;
+      if (err instanceof TypeError || typeof win?.[method] !== 'function') {
         showBrowserCompatibilityNotice();
-        return this.openFallback();
+        return onFallback();
       }
       console.error('An unexpected error occurred:', err);
     }
+  }
+
+  async open() {
+    return this._withPicker('showOpenFilePicker', async ([fileHandle]) => {
+      const win = this.win;
+      const newWindow = typeof win?.open === 'function' ? win.open('./home.html', '_blank', 'width=800,height=600') : null;
+      if (!newWindow) return await this.launchFile(fileHandle);
+
+      const sendHandle = () => { try { newWindow.postMessage({ fileHandle }, '*'); } catch {} };
+      const onReady = (event) => {
+        if (event?.data?.type === 'nanocell:ready' && (!event.source || event.source === newWindow)) {
+          win.removeEventListener?.('message', onReady);
+          sendHandle();
+        }
+      };
+      win.addEventListener?.('message', onReady);
+      newWindow.onload = sendHandle;
+    }, () => this.openFallback());
   }
 
   reloadFile(force = false) {
@@ -231,22 +228,10 @@ class CsvHandle {
 
   async saveAs() {
     if (this.viewOnly) return;
-    const win = this.win;
-    if (typeof win?.showSaveFilePicker !== 'function') {
-      showBrowserCompatibilityNotice();
-      return this.exportDownload();
-    }
-    try {
-      this.handle = await win.showSaveFilePicker(CsvHandle.pickerOptions);
+    return this._withPicker('showSaveFilePicker', async (handle) => {
+      this.handle = handle;
       await this.save();
-    } catch (err) {
-      if (err.name === 'AbortError') return;
-      if (err instanceof TypeError || typeof win.showSaveFilePicker !== 'function') {
-        showBrowserCompatibilityNotice();
-        return this.exportDownload();
-      }
-      console.error('An unexpected error occurred:', err);
-    }
+    }, () => this.exportDownload());
   }
 
   async save() {
@@ -286,10 +271,7 @@ class CsvHandle {
       anchor.style.display = 'none';
       doc.body.appendChild(anchor);
       anchor.click();
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
-        anchor.remove();
-      }, 100);
+      setTimeout(() => { URL.revokeObjectURL(url); anchor.remove(); }, 100);
       sheet.df.isSaved = true;
       sheet.refresh?.();
       Notification.quick(`File saved as ${filename}`);
@@ -299,40 +281,34 @@ class CsvHandle {
     }
   }
 
-  _exportAs(extension, mimeType, serializeFn) {
+  static formatData(format, rows, pretty = true) {
+    const hasHeader = Boolean(settings.freezeHeaderOnOpen);
+    const s = new CsvSerializer(format === 'tsv' ? { delimiter: '\t' } : undefined);
+    if (format === 'json') return s.serializeJson(rows, { pretty, hasHeader });
+    if (format === 'md') return s.serializeMarkdown(rows, { hasHeader });
+    return s.serialize(rows);
+  }
+
+  _exportAs(extension, mimeType, format, pretty = true) {
     const sheet = getSheet();
     if (!sheet?.df) return Notification.quick('No active data to export.');
-    const content = serializeFn(sheet.df.data);
+    const content = CsvHandle.formatData(format, sheet.df.data, pretty);
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const baseName = this.file?.name ? this.file.name.replace(/\.[^.]+$/, '') : 'export';
     this.exportDownload(blob, `${baseName}.${extension}`);
   }
 
-  exportJson(pretty = true) {
-    this._exportAs('json', 'application/json', (data) =>
-      new CsvSerializer().serializeJson(data, { pretty, hasHeader: Boolean(settings.freezeHeaderOnOpen) })
-    );
-  }
+  exportJson(pretty = true) { this._exportAs('json', 'application/json', 'json', pretty); }
+  exportTsv() { this._exportAs('tsv', 'text/tab-separated-values', 'tsv'); }
+  exportMarkdown() { this._exportAs('md', 'text/markdown', 'md'); }
 
-  exportTsv() {
-    this._exportAs('tsv', 'text/tab-separated-values', (data) =>
-      new CsvSerializer({ delimiter: '\t' }).serialize(data)
-    );
-  }
-
-  exportMarkdown() {
-    this._exportAs('md', 'text/markdown', (data) =>
-      new CsvSerializer().serializeMarkdown(data, { hasHeader: Boolean(settings.freezeHeaderOnOpen) })
-    );
-  }
-
-  async _copyFormatted(message, serializeFn) {
+  async _copyFormatted(message, format) {
     const sheet = getSheet();
     if (!sheet) return;
-    const text = serializeFn(sheet.getSelectedMatrix());
+    const text = CsvHandle.formatData(format, sheet.getSelectedMatrix());
     try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
+      if (globalThis.navigator?.clipboard?.writeText) {
+        await globalThis.navigator.clipboard.writeText(text);
         Notification.quick(message);
       }
     } catch (err) {
@@ -341,32 +317,14 @@ class CsvHandle {
     }
   }
 
-  async copyMarkdown() {
-    return this._copyFormatted('Copied selection as Markdown table', (rows) =>
-      new CsvSerializer().serializeMarkdown(rows, { hasHeader: Boolean(settings.freezeHeaderOnOpen) })
-    );
-  }
-
-  async copyJson() {
-    return this._copyFormatted('Copied selection as JSON to clipboard', (rows) =>
-      new CsvSerializer().serializeJson(rows, { pretty: true, hasHeader: Boolean(settings.freezeHeaderOnOpen) })
-    );
-  }
+  async copyMarkdown() { return this._copyFormatted('Copied selection as Markdown table', 'md'); }
+  async copyJson() { return this._copyFormatted('Copied selection as JSON to clipboard', 'json'); }
 
   static serializeMatrix(matrix) {
     return new CsvSerializer({
-      delimiter: settings.delimiter === 'TAB' ? '\t' : settings.delimiter,
+      delimiter: settings.delimiter,
       isStrict: settings.strictSave,
       fixedWidth: settings.fixedWidthSize
     }).serialize(matrix);
   }
 }
-
-CsvHandle.pickerOptions = {
-  types: [{
-    description: 'csv (Comma Separated Value) ',
-    accept: { 'text/csv': ['.csv', '.tsv'] }
-  }]
-};
-
-export { CsvHandle };

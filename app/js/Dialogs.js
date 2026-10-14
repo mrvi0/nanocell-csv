@@ -5,35 +5,26 @@
  */
 
 import { getSheet, Setting, settings, pwa, getNewIssueUrl } from './state.js';
-import { setIcon } from './icons.js';
+import { BaseElement, defineEl, setIcon, hydrateIcons } from './icons.js';
 import { Notification } from './Notification.js';
-
-const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
 export class DialogManager {
   static container = null;
 
   static init(container) {
-    this.container = container || (typeof document !== 'undefined' ? document.getElementById('dialog') : null);
+    this.container = container || globalThis.document?.getElementById?.('dialog') || null;
     if (!this.container || this.container._dialogManagerBound) return;
     this.container._dialogManagerBound = true;
     this.container.addEventListener('keydown', (event) => this.handleKeyDown(event));
   }
 
   static open(element, { fullscreen = false, closeButton = true } = {}) {
-    if (!this.container && typeof document !== 'undefined') this.init();
+    if (!this.container) this.init();
     if (!this.container) return;
 
     this.close();
-    document.activeElement?.blur?.();
-
-    const sheet = getSheet();
-    sheet?.finder?.close?.();
-    if (typeof document !== 'undefined') {
-      for (const finderEl of document.querySelectorAll('ui-finder, .finder-widget')) {
-        (typeof finderEl.close === 'function' ? finderEl : finderEl.parentElement)?.close?.();
-      }
-    }
+    globalThis.document?.activeElement?.blur?.();
+    getSheet()?.finder?.close?.();
 
     this.container.classList.add(fullscreen ? 'dialog-large' : 'dialog-small', 'scroll');
     this.container.appendChild(element);
@@ -48,11 +39,8 @@ export class DialogManager {
       closeBtn.setAttribute('tabindex', '0');
       setIcon(closeBtn, 'off');
       closeBtn.addEventListener('click', () => this.close());
-      closeBtn.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          this.close();
-        }
+      closeBtn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.close(); }
       });
       this.container.appendChild(closeBtn);
     }
@@ -65,19 +53,13 @@ export class DialogManager {
     getSheet()?.refreshScrollbars?.();
   }
 
-  static get isBusy() {
-    return Boolean(this.container && this.container.children.length > 0);
-  }
-
-  static get isLarge() {
-    return Boolean(this.container?.classList.contains('dialog-large'));
-  }
+  static get isBusy() { return Boolean(this.container?.children.length > 0); }
+  static get isLarge() { return Boolean(this.container?.classList.contains('dialog-large')); }
 
   static cycleFocus(event, focusableElements) {
-    if (!focusableElements || focusableElements.length === 0) return;
+    if (!focusableElements?.length) return;
     event.preventDefault();
-    const active = typeof document !== 'undefined' ? document.activeElement : null;
-    const index = focusableElements.indexOf(active);
+    const index = focusableElements.indexOf(globalThis.document?.activeElement);
     const nextIndex = event.shiftKey
       ? (index <= 0 ? focusableElements.length - 1 : index - 1)
       : (index === -1 || index >= focusableElements.length - 1 ? 0 : index + 1);
@@ -87,10 +69,10 @@ export class DialogManager {
   static handleKeyDown(event) {
     if (event.defaultPrevented || event.key !== 'Tab' || !this.container) return;
     const selector = '.ui-list, .ui-num, .ui-bool-toggle, ui-bool, button:not([tabindex="-1"]), input:not([tabindex="-1"]), select:not([tabindex="-1"]), textarea:not([tabindex="-1"]), #close-dialog, [tabindex="0"]';
-    const focusableElements = Array.from(this.container.querySelectorAll(selector))
+    const focusables = Array.from(this.container.querySelectorAll(selector))
       .filter(el => !el.disabled && el.style.display !== 'none' && !el.closest?.('.hidden'))
-      .filter((el, _, arr) => !arr.some(parent => parent !== el && parent.contains(el)));
-    this.cycleFocus(event, focusableElements);
+      .filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+    this.cycleFocus(event, focusables);
   }
 }
 
@@ -98,20 +80,18 @@ export class DialogManager {
 
 export function getNextPow2(value) {
   if (value < 1) return 1;
-  const power = Math.floor(Math.log2(value));
-  const candidate = Math.pow(2, power);
-  return candidate > value ? candidate : Math.pow(2, power + 1);
+  const candidate = 2 ** Math.floor(Math.log2(value));
+  return candidate > value ? candidate : candidate * 2;
 }
 
 export function getPrevPow2(value) {
   if (value <= 1) return 1;
-  const power = Math.ceil(Math.log2(value));
-  const candidate = Math.pow(2, power);
-  return candidate < value ? candidate : Math.pow(2, power - 1);
+  const candidate = 2 ** Math.ceil(Math.log2(value));
+  return candidate < value ? candidate : candidate / 2;
 }
 
 export function formatThousands(value) {
-  if (value === null || value === undefined || value === '') return '';
+  if (value == null || value === '') return '';
   const str = typeof value === 'string' ? value.replace(/\s+/g, '') : String(value);
   if (!Number.isFinite(Number(str))) return String(value);
   const parts = str.split('.');
@@ -119,7 +99,13 @@ export function formatThousands(value) {
   return parts.join('.');
 }
 
-class BoolInput extends BaseElement {
+function emitChange(el, isUserAction) {
+  if (isUserAction && typeof Event !== 'undefined') {
+    el.dispatchEvent?.(new Event('change', { bubbles: true }));
+  }
+}
+
+export class BoolInput extends BaseElement {
   constructor(initialValue = false) {
     super();
     this._value = Boolean(initialValue);
@@ -133,14 +119,11 @@ class BoolInput extends BaseElement {
     this.classList.add('ui-bool-toggle');
     this.render();
 
-    this.addEventListener('click', () => {
-      this.focus();
-      this.setValueInternal(!this._value, true);
-    });
-    this.addEventListener('keydown', (event) => {
-      const key = event.key.toUpperCase();
-      if (key === ' ' || key === 'ENTER' || key === 'ARROWLEFT' || key === 'ARROWRIGHT') {
-        event.preventDefault();
+    this.addEventListener('click', () => { this.focus(); this.setValueInternal(!this._value, true); });
+    this.addEventListener('keydown', (e) => {
+      const k = e.key.toUpperCase();
+      if (k === ' ' || k === 'ENTER' || k === 'ARROWLEFT' || k === 'ARROWRIGHT') {
+        e.preventDefault();
         this.setValueInternal(!this._value, true);
       }
     });
@@ -149,12 +132,8 @@ class BoolInput extends BaseElement {
   render() {
     if (!this._initialized) return;
     if (!this.track) {
-      this.track = document.createElement('div');
-      this.track.className = 'toggle-track';
-      this.thumb = document.createElement('div');
-      this.thumb.className = 'toggle-thumb';
-      this.track.appendChild(this.thumb);
-      this.appendChild(this.track);
+      this.innerHTML = '<div class="toggle-track"><div class="toggle-thumb"></div></div>';
+      this.track = this.firstElementChild;
     }
     this.setAttribute('aria-checked', String(this._value));
     this.classList.toggle('checked', this._value);
@@ -166,46 +145,42 @@ class BoolInput extends BaseElement {
   setValueInternal(val, isUserAction = false) {
     this._value = Boolean(val);
     this.render();
-    if (isUserAction && typeof Event !== 'undefined') {
-      this.dispatchEvent?.(new Event('change', { bubbles: true }));
-    }
+    emitChange(this, isUserAction);
   }
 }
 
 class StepperInput extends BaseElement {
   initStepper(className, leftIcon, leftLabel, rightIcon, rightLabel) {
     this.classList.add(className);
-    const createStepButton = (iconName, label) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'icon';
-      button.tabIndex = -1;
-      button.setAttribute('aria-label', label);
-      button.title = label;
-      setIcon(button, iconName);
-      return button;
+    const makeBtn = (icon, label) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'icon';
+      btn.tabIndex = -1;
+      btn.setAttribute('aria-label', label);
+      btn.title = label;
+      setIcon(btn, icon);
+      return btn;
     };
-    this.leftBtn = createStepButton(leftIcon, leftLabel);
+    this.leftBtn = makeBtn(leftIcon, leftLabel);
     this.centerEl = document.createElement('section');
-    this.rightBtn = createStepButton(rightIcon, rightLabel);
+    this.rightBtn = makeBtn(rightIcon, rightLabel);
   }
 
   mountStepper(onPrev, onNext) {
     this.setAttribute('tabindex', '0');
-    this.appendChild(this.leftBtn);
-    this.appendChild(this.centerEl);
-    this.appendChild(this.rightBtn);
-    this.leftBtn.addEventListener('click', (event) => { event.stopPropagation(); this.focus(); onPrev(); });
-    this.rightBtn.addEventListener('click', (event) => { event.stopPropagation(); this.focus(); onNext(); });
-    this.addEventListener('keydown', (event) => {
-      const key = event.key.toUpperCase();
-      if (key === 'ARROWLEFT' || key === 'ARROWDOWN') { event.preventDefault(); onPrev(); }
-      else if (key === 'ARROWRIGHT' || key === 'ARROWUP') { event.preventDefault(); onNext(); }
+    this.append(this.leftBtn, this.centerEl, this.rightBtn);
+    this.leftBtn.addEventListener('click', (e) => { e.stopPropagation(); this.focus(); onPrev(); });
+    this.rightBtn.addEventListener('click', (e) => { e.stopPropagation(); this.focus(); onNext(); });
+    this.addEventListener('keydown', (e) => {
+      const k = e.key.toUpperCase();
+      if (k === 'ARROWLEFT' || k === 'ARROWDOWN') { e.preventDefault(); onPrev(); }
+      else if (k === 'ARROWRIGHT' || k === 'ARROWUP') { e.preventDefault(); onNext(); }
     });
   }
 }
 
-class ListInput extends StepperInput {
+export class ListInput extends StepperInput {
   constructor(optionsList = [], hideUnselected = true) {
     super();
     this.selectedIndex = 0;
@@ -232,10 +207,7 @@ class ListInput extends StepperInput {
   get value() { return this.centerEl.children[this.selectedIndex]?.innerText; }
   set value(val) {
     for (let i = 0; i < this.centerEl.children.length; i++) {
-      if (this.centerEl.children[i].innerText == val) {
-        this.setSelectedIndex(i, false);
-        break;
-      }
+      if (this.centerEl.children[i].innerText == val) return this.setSelectedIndex(i, false);
     }
   }
 
@@ -246,13 +218,11 @@ class ListInput extends StepperInput {
     for (let i = 0; i < length; i++) {
       this.centerEl.children[i].setAttribute('selected', i === this.selectedIndex ? 'true' : 'false');
     }
-    if (isUserAction && typeof Event !== 'undefined') {
-      this.dispatchEvent?.(new Event('change', { bubbles: true }));
-    }
+    emitChange(this, isUserAction);
   }
 }
 
-class NumInput extends StepperInput {
+export class NumInput extends StepperInput {
   constructor(initialValue = 0, min = 0, max = 999, stepMode = 'linear') {
     super();
     this._value = Number(initialValue);
@@ -269,11 +239,11 @@ class NumInput extends StepperInput {
     if (this.rightBtn) this.rightBtn.disabled = this._value >= this.max;
   }
 
-  step(direction = 1) {
-    const nextValue = this.stepMode === 'pow2'
-      ? (direction > 0 ? getNextPow2(this._value) : getPrevPow2(this._value))
-      : this._value + direction;
-    this.setValueInternal(nextValue, true);
+  step(dir = 1) {
+    const next = this.stepMode === 'pow2'
+      ? (dir > 0 ? getNextPow2(this._value) : getPrevPow2(this._value))
+      : this._value + dir;
+    this.setValueInternal(next, true);
   }
 
   connectedCallback() {
@@ -295,17 +265,13 @@ class NumInput extends StepperInput {
     this._value = Math.max(this.min, Math.min(this.max, Number(val)));
     if (this.centerEl) this.centerEl.innerHTML = formatThousands(this._value);
     this.updateButtonStates();
-    if (isUserAction && typeof Event !== 'undefined') {
-      this.dispatchEvent?.(new Event('change', { bubbles: true }));
-    }
+    emitChange(this, isUserAction);
   }
 }
 
-if (typeof customElements !== 'undefined') {
-  if (!customElements.get('ui-bool')) customElements.define('ui-bool', BoolInput);
-  if (!customElements.get('ui-list')) customElements.define('ui-list', ListInput);
-  if (!customElements.get('ui-num')) customElements.define('ui-num', NumInput);
-}
+defineEl('ui-bool', BoolInput);
+defineEl('ui-list', ListInput);
+defineEl('ui-num', NumInput);
 
 // --- Settings Dialog ---
 
@@ -314,24 +280,18 @@ export class SettingDialog {
     const row = document.createElement('div');
     row.className = 'setting-row';
     row.innerHTML = `<div class="setting-label-container"><span class="setting-name">${setting.name}</span></div><div class="setting-control"></div>`;
-    const inputCell = row.lastElementChild;
 
     let input;
-    if (setting.list) {
-      input = new ListInput(setting.list, setting.hide);
-    } else if (setting.stepMode) {
-      input = new NumInput(settings[setting.key] ?? setting.defaultValue, setting.min ?? 1, setting.max ?? Infinity, setting.stepMode);
-    } else if (setting.max) {
-      input = new NumInput(setting.defaultValue, setting.min, setting.max);
-    } else if (typeof setting.defaultValue === 'boolean') {
-      input = new BoolInput();
-    }
+    if (setting.list) input = new ListInput(setting.list, setting.hide);
+    else if (setting.stepMode) input = new NumInput(settings[setting.key] ?? setting.defaultValue, setting.min ?? 1, setting.max ?? Infinity, setting.stepMode);
+    else if (setting.max) input = new NumInput(setting.defaultValue, setting.min, setting.max);
+    else if (typeof setting.defaultValue === 'boolean') input = new BoolInput();
 
     if (input) {
       if (!input._initialized) input.connectedCallback?.();
       input.value = settings[setting.key];
-      input.onchange = (event) => {
-        const nextVal = event.target.value;
+      input.onchange = (e) => {
+        const nextVal = e.target.value;
         settings[setting.key] = (nextVal !== '' && !isNaN(nextVal)) ? Number(nextVal) : nextVal;
       };
     } else {
@@ -339,32 +299,27 @@ export class SettingDialog {
       input.innerText = settings[setting.key];
     }
 
-    inputCell.appendChild(input);
+    row.lastElementChild.appendChild(input);
     row.addEventListener('focusin', () => row.classList.add('active'));
-    row.addEventListener('focusout', (event) => {
-      if (!row.contains(event.relatedTarget)) row.classList.remove('active');
-    });
-    row.addEventListener('click', (event) => {
-      if (input.focus && !input.contains(event.target)) input.focus();
-    });
+    row.addEventListener('focusout', (e) => { if (!row.contains(e.relatedTarget)) row.classList.remove('active'); });
+    row.addEventListener('click', (e) => { if (input.focus && !input.contains(e.target)) input.focus(); });
     return row;
   }
 
   static show() {
     const content = document.createElement('div');
-    content.className = 'stg-container stg';
+    content.className = 'stg-container';
     content.innerHTML = `
       <div class="stg-header"><h1>Settings</h1></div>
       <div class="stg-body"></div>
       <div class="stg-footer">
-        <button class="icon btn-reset-settings" type="button" title="Reset to default settings" aria-label="Reset to default settings"></button>
+        <button class="icon btn-reset-settings" type="button" title="Reset to default settings" aria-label="Reset to default settings" data-icon="reset_settings"></button>
       </div>
     `;
+    hydrateIcons(content);
 
     const body = content.querySelector('.stg-body');
-    const resetBtn = content.querySelector('.btn-reset-settings');
-    setIcon(resetBtn, 'reset_settings');
-    resetBtn.onclick = () => {
+    content.querySelector('.btn-reset-settings').onclick = () => {
       Setting.resetDefault();
       SettingDialog.show();
     };
@@ -384,9 +339,7 @@ export class SettingDialog {
 
     DialogManager.open(content, { fullscreen: true });
     const firstInput = content.querySelector('.ui-list, .ui-num, .ui-bool-toggle');
-    if (firstInput?.focus) {
-      setTimeout(() => { try { firstInput.focus(); } catch {} }, 0);
-    }
+    if (firstInput?.focus) setTimeout(() => { try { firstInput.focus(); } catch {} }, 0);
   }
 }
 
@@ -405,22 +358,19 @@ export class AboutDialog extends BaseElement {
       <h1>Nanocell CSV Editor</h1>
       <div class="about-version-container">
         <h3>${version}</h3>
-        <button class="icon about-copy-btn" type="button" title="Copy version" aria-label="Copy version"></button>
+        <button class="icon about-copy-btn" type="button" title="Copy version" aria-label="Copy version" data-icon="copy"></button>
         ${isStandalone ? '<span class="about-mode-badge">(Desktop App)</span>' : ''}
       </div>
       <div class="about-footer">
         <a href="${getNewIssueUrl(version)}" target="_blank" class="about-bug-link">
-          <button class="icon" type="button" title="Bug Report" aria-label="Bug Report"></button>
+          <button class="icon" type="button" title="Bug Report" aria-label="Bug Report" data-icon="bug"></button>
         </a>
         <a href="https://nanocell-csv.com/" target="_blank" class="about-home-link">https://nanocell-csv.com/</a>
       </div>
     `;
+    hydrateIcons(this);
 
     const copyBtn = this.querySelector('.about-copy-btn');
-    const bugBtn = this.querySelector('.about-bug-link button');
-    setIcon(copyBtn, 'copy');
-    setIcon(bugBtn, 'bug');
-
     copyBtn.onclick = async () => {
       const textToCopy = `Nanocell CSV Editor-${version}`;
       try { await navigator.clipboard.writeText(textToCopy); } catch {}
@@ -440,8 +390,4 @@ export class AboutDialog extends BaseElement {
   }
 }
 
-if (typeof customElements !== 'undefined' && !customElements.get('ui-about')) {
-  customElements.define('ui-about', AboutDialog);
-}
-
-export { BoolInput, ListInput, NumInput };
+defineEl('ui-about', AboutDialog);
