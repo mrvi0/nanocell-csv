@@ -9,6 +9,7 @@ import { runDataframeTests } from './Dataframe.test.js';
 import { runDataValidatorTests } from './DataValidator.test.js';
 import { runEnvAndPwaTests } from './EnvAndPwa.test.js';
 import { runFileOpenTests } from './FileOpen.test.js';
+import { runScenarioRunnerTests } from './ScenarioRunner.test.js';
 
 console.log('=================================================================');
 console.log('🚀 NanoCell CSV: Running Complete CSV Test Suite');
@@ -23,11 +24,12 @@ const dataframeResults = runDataframeTests();
 const validatorResults = runDataValidatorTests();
 const envPwaResults = await runEnvAndPwaTests();
 const fileOpenResults = await runFileOpenTests();
+const scenarioResults = await runScenarioRunnerTests();
 
 const durationMs = Math.round(performance.now() - startTime);
 
-const totalPassed = parserResults.passed + separatorResults.passed + serializerResults.passed + dataframeResults.passed + validatorResults.passed + envPwaResults.passed + fileOpenResults.passed;
-const totalFailed = parserResults.failed + separatorResults.failed + serializerResults.failed + dataframeResults.failed + validatorResults.failed + envPwaResults.failed + fileOpenResults.failed;
+const totalPassed = parserResults.passed + separatorResults.passed + serializerResults.passed + dataframeResults.passed + validatorResults.passed + envPwaResults.passed + fileOpenResults.passed + scenarioResults.passed;
+const totalFailed = parserResults.failed + separatorResults.failed + serializerResults.failed + dataframeResults.failed + validatorResults.failed + envPwaResults.failed + fileOpenResults.failed + scenarioResults.failed;
 const totalTests = totalPassed + totalFailed;
 
 console.log('\n=================================================================');
@@ -40,6 +42,7 @@ console.log('=================================================================')
   console.log(`  DataValidator:     ${validatorResults.passed} passed, ${validatorResults.failed} failed`);
   console.log(`  EnvAndPwa:         ${envPwaResults.passed} passed, ${envPwaResults.failed} failed`);
   console.log(`  FileOpen:          ${fileOpenResults.passed} passed, ${fileOpenResults.failed} failed`);
+  console.log(`  ScenarioRunner:    ${scenarioResults.passed} passed, ${scenarioResults.failed} failed`);
 console.log('-----------------------------------------------------------------');
 console.log(`  TOTAL:             ${totalPassed} / ${totalTests} passed (${durationMs}ms)`);
 console.log('=================================================================');

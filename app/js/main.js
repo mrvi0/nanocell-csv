@@ -28,6 +28,14 @@ export function initApp() {
   if (!env.supportsFileSystemAccess) {
     showBrowserCompatibilityNotice();
   }
+  const checkScenarioHash = () => {
+    const hash = globalThis.location?.hash || '';
+    if (/^#(scenario-|demo=)/i.test(hash)) {
+      import('./scenarios/ScenarioRunner.js').then(m => m.bootScenarioFromHash(hash));
+    }
+  };
+  checkScenarioHash();
+  globalThis.window?.addEventListener?.('hashchange', checkScenarioHash);
 }
 
 if (typeof document !== 'undefined') {

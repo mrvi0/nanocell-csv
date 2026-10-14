@@ -75,10 +75,11 @@ function bindGlobalMouse() {
   });
 
   document.addEventListener('mousedown', (event) => {
-    if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'BUTTON' && !event.target.closest?.('ui-about')) {
+    const tag = event.target?.tagName;
+    if (tag !== 'INPUT' && tag !== 'BUTTON' && tag !== 'SELECT' && !event.target?.closest?.('ui-about, .nc-scenario-hud')) {
       event.preventDefault();
     }
-    if (event.target.tagName !== 'INPUT' && document.activeElement?.tagName === 'INPUT') {
+    if (tag !== 'INPUT' && tag !== 'SELECT' && document.activeElement?.tagName === 'INPUT') {
       document.activeElement.blur();
     }
     if (event.button !== 0) return;
