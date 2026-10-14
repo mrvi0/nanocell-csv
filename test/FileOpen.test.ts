@@ -1,7 +1,7 @@
 import assert from 'node:assert';
-import { loadcsv, load_csv_view_only } from '../app/js/io/csv_worker.js';
-import { getSheet, setSheet } from '../app/js/appContext.js';
-import { Dataframe } from '../core/model/Dataframe.js';
+import { loadcsv, load_csv_view_only } from '../app/js/csv_worker.js';
+import { getSheet, setSheet } from '../app/js/state.js';
+import { Dataframe } from '../core/Dataframe.js';
 
 if (typeof globalThis.HTMLElement === 'undefined') {
   (globalThis as any).HTMLElement = class {
@@ -45,8 +45,8 @@ if (typeof globalThis.document === 'undefined') {
   };
 }
 
-const { CsvHandle } = await import('../app/js/io/CsvHandle.js');
-const { Setting, stg } = await import('../app/js/ui/settings/Setting.js');
+const { CsvHandle } = await import('../app/js/CsvHandle.js');
+const { Setting, stg } = await import('../app/js/state.js');
 
 /**
  * Creates a File-like Blob with a `.name` property for headless Node testing.

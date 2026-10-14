@@ -2,7 +2,7 @@
  * @file test/Dataframe.test.ts
  * Tests for Dataframe streaming row ingestion, lock state handling, and view-only support.
  */
-import { Dataframe } from '../core/model/Dataframe.js';
+import { Dataframe } from '../core/Dataframe.js';
 
 interface TestResult {
   passed: number;
@@ -76,17 +76,17 @@ export function runDataframeTests(): TestResult {
     const df = new Dataframe([['A', 'B'], ['1', '2']]);
     df.lock = true;
 
-    df.edit(0, 1, 'MODIFIED');
+    df.editRange(0, 0, 1, 1, 'MODIFIED');
     assertEqual(df.get(0, 1), '1', 'Edit must be rejected');
 
-    df.deleteRow(1);
-    assertEqual(df.height, 2, 'deleteRow must be rejected');
+    df.deleteRows(1, 1);
+    assertEqual(df.height, 2, 'deleteRows must be rejected');
 
     df.insertRow(1);
     assertEqual(df.height, 2, 'insertRow must be rejected');
 
-    df.deleteCol(0);
-    assertEqual(df.width, 2, 'deleteCol must be rejected');
+    df.deleteCols(0, 0);
+    assertEqual(df.width, 2, 'deleteCols must be rejected');
 
     df.insertCol(0);
     assertEqual(df.width, 2, 'insertCol must be rejected');

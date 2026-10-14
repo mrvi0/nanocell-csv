@@ -1,5 +1,4 @@
-import { CsvParser } from '../../../core/csv/CsvParser.js';
-import { SeparatorDetector } from '../../../core/csv/SeparatorDetector.js';
+import { CsvParser, SeparatorDetector } from '../../core/Csv.js';
 
 const CHUNK_SIZE = 500 * 1000;
 let currentAbort = false;
@@ -48,16 +47,10 @@ function loadcsv(data, postFn = postWorkerMessage) {
     return;
   }
 
-  let offset = 0;
-  let iteration = 0;
-  let sep = ',';
-  let sepDetected = false;
-  let totalRowsEmitted = 0;
-  let firstChunkEmitted = false;
+  let offset = 0, iteration = 0, sep = ',', sepDetected = false;
+  let totalRowsEmitted = 0, firstChunkEmitted = false;
   const FIRST_CHUNK_TARGET = 100;
-  let pendingRows = [];
-  let pendingOffset = 0;
-  let parser = null;
+  let pendingRows = [], pendingOffset = 0, parser = null;
 
   const textDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8', { fatal: false }) : null;
   const reader = new ReaderClass();
@@ -140,12 +133,10 @@ function loadcsv(data, postFn = postWorkerMessage) {
 }
 
 function load_csv_view_only(data, postFn = postWorkerMessage) {
-  const file = data.file;
-  const readId = data.readId;
+  const file = data.file, readId = data.readId;
   const fileSize = file ? file.size : 0;
-  let sep = ',';
+  let sep = ',', iteration = 0;
   const reader = new ReaderClass();
-  let iteration = 0;
   const vo_n_chunks = data.n_chunks || 1;
   const vo_n_rows = data.n_rows || 100;
   const trimUnquoted = Boolean(data.trimUnquoted);
@@ -213,4 +204,3 @@ if (typeof self !== 'undefined' && typeof self.addEventListener === 'function') 
 
 export { csv_parse, loadcsv, load_csv_view_only };
 export default class CsvWorkerFallback {}
-

@@ -1,7 +1,12 @@
-import { getSheet } from '../appContext.js';
-import { setIcon } from '../utils/icons.js';
+/**
+ * @file app/js/ValidationPane.js
+ * Three-tier validation drawer (<ui-validation-pane>) with virtualized item list.
+ */
+
+import { getSheet } from './state.js';
+import { setIcon, escapeHtml } from './icons.js';
 import { Notification } from './Notification.js';
-import { DataValidator } from '../../../core/validation/DataValidator.js';
+import { DataValidator } from '../../core/DataValidator.js';
 
 export const VALIDATION_RULES = [
   { id: 'headers', label: 'Headers & SQL Compliance', description: 'Sanitize column headers for SQL identifier standards and duplicates', icon: 'validate_headers' },
@@ -15,8 +20,28 @@ export const VALIDATION_RULES = [
 ];
 
 const ITEM_HEIGHT = 44;
+const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
-class ValidationPane extends HTMLElement {
+export class ValidationPane extends BaseElement {
+  static getInstance() {
+    return typeof document !== 'undefined'
+      ? (document.getElementById('validation-pane') || document.querySelector('ui-validation-pane'))
+      : null;
+  }
+
+  static toggle() {
+    const pane = ValidationPane.getInstance();
+    if (pane) pane.toggle ? pane.toggle() : pane.show?.();
+  }
+
+  static run(ruleId) {
+    const pane = ValidationPane.getInstance();
+    if (pane) {
+      pane.show?.();
+      pane.runRule?.(ruleId);
+    }
+  }
+
   constructor() {
     super();
     this.items = [];
@@ -29,9 +54,7 @@ class ValidationPane extends HTMLElement {
     this._lastTxTimestamp = 0;
   }
 
-  connectedCallback() {
-    this.init();
-  }
+  connectedCallback() { this.init(); }
 
   get isOpen() {
     return this.classList.contains('open') && this.style.display !== 'none';
@@ -143,9 +166,7 @@ class ValidationPane extends HTMLElement {
 
   applyIcons(container = this) {
     if (!container) return;
-    for (const el of container.querySelectorAll('[data-icon]')) {
-      setIcon(el, el.dataset.icon);
-    }
+    for (const el of container.querySelectorAll('[data-icon]')) setIcon(el, el.dataset.icon);
   }
 
   getColHeader(colIndex) {
@@ -239,8 +260,7 @@ class ValidationPane extends HTMLElement {
   handleAcceptAll() {
     if (this.view === 'columns') {
       const pending = this.getPendingItems();
-      if (pending.length === 0) return;
-      this.resolveItems(pending, true);
+      if (pending.length > 0) this.resolveItems(pending, true);
     } else if (this.view === 'detail' && this.currentCol !== null) {
       this.resolveItems(this.getPendingItems(this.currentCol), true);
     }
@@ -296,8 +316,8 @@ class ValidationPane extends HTMLElement {
       <div class="validation-rule-card" data-rule-id="${rule.id}">
         <button class="icon validation-rule-icon" type="button" tabindex="-1" aria-hidden="true" data-icon="${rule.icon}"></button>
         <div class="validation-rule-body">
-          <div class="validation-rule-title">${this.escapeHtml(rule.label)}</div>
-          <div class="validation-rule-desc">${this.escapeHtml(rule.description)}</div>
+          <div class="validation-rule-title">${escapeHtml(rule.label)}</div>
+          <div class="validation-rule-desc">${escapeHtml(rule.description)}</div>
         </div>
         <button class="icon validation-rule-nav" type="button" tabindex="-1" aria-hidden="true" data-icon="arrow_right"></button>
       </div>
@@ -325,7 +345,7 @@ class ValidationPane extends HTMLElement {
     this.columnsView.innerHTML = groups.map(group => `
       <div class="validation-col-card" data-col="${group.x}">
         <div class="validation-col-info">
-          <span class="validation-col-label">Col ${group.x + 1}: ${this.escapeHtml(group.header)}</span>
+          <span class="validation-col-label">Col ${group.x + 1}: ${escapeHtml(group.header)}</span>
           <span class="validation-col-count">${group.items.length}</span>
         </div>
         <div class="validation-col-actions">
@@ -354,9 +374,7 @@ class ValidationPane extends HTMLElement {
     if (this.colItems.length === 0) return this.showColumns();
 
     if (this.countBadge) this.countBadge.textContent = this.colItems.length;
-    if (this.virtualSpacer) {
-      this.virtualSpacer.style.height = `${this.colItems.length * ITEM_HEIGHT}px`;
-    }
+    if (this.virtualSpacer) this.virtualSpacer.style.height = `${this.colItems.length * ITEM_HEIGHT}px`;
     this._lastRenderStart = -1;
     this._lastRenderEnd = -1;
     this.renderVirtualWindow();
@@ -434,9 +452,9 @@ class ValidationPane extends HTMLElement {
       html += `
         <div class="validation-item ${this.selectedItem === item ? 'selected' : ''}" data-idx="${i}">
           <div class="validation-item-diff">
-            <span class="diff-old" title="${this.escapeHtml(item.oldValue)}">${this.formatVal(item.oldValue)}</span>
+            <span class="diff-old" title="${escapeHtml(item.oldValue)}">${this.formatVal(item.oldValue)}</span>
             <span class="diff-arrow">&rarr;</span>
-            <span class="diff-new" title="${this.escapeHtml(item.newValue)}">${this.formatVal(item.newValue)}</span>
+            <span class="diff-new" title="${escapeHtml(item.newValue)}">${this.formatVal(item.newValue)}</span>
           </div>
           <div class="validation-item-actions">
             <button class="icon validation-btn item-accept-btn" type="button" title="Accept edit" aria-label="Accept edit" data-icon="on"></button>
@@ -461,24 +479,11 @@ class ValidationPane extends HTMLElement {
 
   formatVal(val) {
     if (val === undefined || val === null || val === '') return '<em>empty</em>';
-    const escaped = this.escapeHtml(val);
+    const escaped = escapeHtml(val);
     return escaped.includes('\n') ? escaped.replace(/\n/g, '\\n') : escaped;
   }
-
-  escapeHtml(str) {
-    if (typeof str !== 'string') str = String(str ?? '');
-    if (!/[&<>"']/.test(str)) return str;
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
 }
 
-if (!customElements.get('ui-validation-pane')) {
+if (typeof customElements !== 'undefined' && !customElements.get('ui-validation-pane')) {
   customElements.define('ui-validation-pane', ValidationPane);
 }
-
-export { ValidationPane };

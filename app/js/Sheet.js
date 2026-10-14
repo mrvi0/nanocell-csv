@@ -1,12 +1,15 @@
-import { Dataframe, orderRange } from '../../../core/model/Dataframe.js';
-import { dom } from '../ui/AppLayout.js';
-import { FinderDialog } from '../ui/FinderDialog.js';
-import { FilterDialog } from '../ui/FilterDialog.js';
-import { getSheet, setSheet } from '../appContext.js';
-import { Setting, stg } from '../ui/settings/Setting.js';
-import { Notification } from '../ui/Notification.js';
-import { SearchEngine } from '../../../core/search/SearchEngine.js';
-import { SheetView } from './SheetView.js';
+/**
+ * @file app/js/Sheet.js
+ * Unified <ui-sheet> spreadsheet web component: virtualized table DOM rendering,
+ * viewport & range selection, inline cell editing, clipboard operations, and mouse routing.
+ */
+
+import { Dataframe, orderRange, isUrl, isIsoDate } from '../../core/Dataframe.js';
+import { CsvParser, CsvSerializer, SeparatorDetector } from '../../core/Csv.js';
+import { getSheet, setSheet, Setting, stg } from './state.js';
+import { dom, footerUpdate, scrollbarRefresh } from './AppLayout.js';
+import { FinderDialog, FilterDialog } from './SheetOverlays.js';
+import { Notification } from './Notification.js';
 
 const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
 
@@ -176,7 +179,7 @@ function bindGlobalMouse() {
   });
 }
 
-class Sheet extends BaseElement {
+export class Sheet extends BaseElement {
   static _finder = null;
   static _filter = null;
 
@@ -210,9 +213,8 @@ class Sheet extends BaseElement {
     this.id = 'sheet';
     this.classList.add('sheet');
 
-    this.view = new SheetView(this);
-    this.selection = this;
-    this.controller = this;
+    this.table = document.createElement('table');
+    this.appendChild(this.table);
 
     this.bindEvents();
 
@@ -237,8 +239,7 @@ class Sheet extends BaseElement {
     this.reload();
   }
 
-  get table() { return this.view.table; }
-  get rows() { return this.view.rows; }
+  get rows() { return this.table.rows; }
   get width() { return this.rows[0] ? this.rows[0].cells.length - 1 : 0; }
   get height() { return this.rows.length - 1; }
   get rowCount() { return this.filterRows ? this.filterRows.length : this.df.height; }
@@ -264,7 +265,7 @@ class Sheet extends BaseElement {
     const next = Math.max(0, n);
     if (next !== this._bx) {
       this._bx = next;
-      this.view.refresh();
+      this.refresh();
     }
   }
 
@@ -273,9 +274,120 @@ class Sheet extends BaseElement {
     const next = Math.max(0, n);
     if (next !== this._by) {
       this._by = next;
-      this.view.refresh();
+      this.refresh();
     }
   }
+
+  // --- Virtualized Table Rendering ---
+
+  reload() {
+    while (this.table.rows[0]) this.table.rows[0].remove();
+    for (let y = 0; y < this.nViewRows + 1; y++) {
+      const tr = document.createElement('tr');
+      this.table.appendChild(tr);
+      for (let x = 0; x < this.nViewCols + 1; x++) {
+        const cell = document.createElement('td');
+        cell.tx = x - 1;
+        cell.ty = y - 1;
+
+        if (x === 0 || y === 0) cell.classList.add('tHeader');
+        if (y === 0) cell.classList.add('tColHeader');
+        if (x === 0) cell.classList.add('tRowHeader');
+
+        if (y === 0 && x > 0) {
+          const hdrTxt = document.createElement('span');
+          hdrTxt.classList.add('noclick');
+          cell.appendChild(hdrTxt);
+        } else if (y > 0) {
+          cell.appendChild(document.createElement('div'));
+        }
+        tr.appendChild(cell);
+      }
+    }
+    this.refresh();
+    this.slctRefresh(false);
+  }
+
+  refresh() {
+    if (this._refreshRafId) cancelAnimationFrame(this._refreshRafId);
+    this._refreshRafId = requestAnimationFrame(() => {
+      this._refreshRafId = null;
+      for (let x = 0; x < this.width; x++) this.loadTopHeader(x);
+      for (let y = 0; y < this.height; y++) {
+        const actualY = this.getRowIndex(this.baseY + y);
+        this.loadLeftHeader(y, actualY);
+        for (let x = 0; x < this.width; x++) {
+          this.loadCell(this.rows[y + 1].cells[x + 1], this.baseX + x, actualY);
+        }
+      }
+      const cell = this.bestInputCell();
+      if (this.inputing && cell && this.inputField.parentNode !== cell) {
+        cell.appendChild(this.inputField);
+      }
+      footerUpdate(this);
+    });
+  }
+
+  loadCell(c, x, y) {
+    const div = c?.firstChild;
+    if (!div) return;
+    if (y < 0 || y >= this.df.height) {
+      div.className = '';
+      div.textContent = '';
+      return;
+    }
+
+    const d = this.df.get(x, y);
+    if (!d) {
+      div.className = '';
+      div.textContent = '';
+      return;
+    }
+
+    let cls = '';
+    if (d[0] === '!') cls += ' error';
+    if (!isNaN(d)) cls += ' num';
+    if (isIsoDate(d)) cls += ' date';
+    if (isUrl(d)) cls += ' url';
+    if (stg.purple && (d.includes(',') || d.includes('"') || d.includes('\n'))) cls += ' noComply';
+
+    div.className = cls.charCodeAt(0) === 32 ? cls.slice(1) : cls;
+    if (!d.includes('&') && !d.includes('<') && !d.includes('\n')) {
+      div.textContent = d;
+    } else {
+      div.innerHTML = d.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('\n', '<br>');
+    }
+  }
+
+  loadTopHeader(x) {
+    const cell = this.rows[0]?.cells[x + 1];
+    if (!cell) return;
+    const matrixX = this.baseX + x;
+    const hdr = this.fixTop ? this.df.get(matrixX, 0) : '';
+    cell.firstChild.textContent = hdr.length > 0 ? hdr : matrixX + 1;
+
+    if (this.expandedCol !== null && this.expandedCol !== undefined) {
+      const isExp = matrixX === this.expandedCol;
+      cell.classList.toggle('col-expanded', isExp);
+      cell.classList.toggle('col-collapsed', !isExp);
+      cell.style.width = isExp ? '100%' : '0%';
+    } else {
+      cell.classList.remove('col-expanded', 'col-collapsed');
+      cell.style.width = `${100.0 / (this.nViewCols || 10)}%`;
+    }
+  }
+
+  loadLeftHeader(y, actualY) {
+    const cell = this.rows[y + 1]?.cells[0];
+    if (!cell) return;
+    const label = actualY !== undefined ? (actualY >= 0 ? String(actualY + 1) : '') : String(this.baseY + y + 1);
+    (cell.firstChild || cell).textContent = label;
+  }
+
+  scrollbarRefresh() { scrollbarRefresh(this); }
+  footerUpdate() { footerUpdate(this); }
+
+  // --- Events & Filtering ---
 
   bindEvents() {
     this.addEventListener('wheel', (e) => this.scroll(e), { passive: false });
@@ -305,7 +417,7 @@ class Sheet extends BaseElement {
         else if (k === 'ARROWUP') this.y--;
         else this.y++;
         this.slctRefresh();
-        this.view.refresh();
+        this.refresh();
       }
     });
 
@@ -332,7 +444,7 @@ class Sheet extends BaseElement {
       } else if (td.ty < 0 && td.tx >= 0) {
         const colIdx = this.baseX + td.tx;
         this.expandedCol = this.expandedCol === colIdx ? null : colIdx;
-        this.view.refresh();
+        this.refresh();
       }
     });
   }
@@ -347,14 +459,14 @@ class Sheet extends BaseElement {
     this.filterRows = this.df.filterColumn(colIndex, text, matchCase, Boolean(this.fixTop));
     this.baseY = 0;
     this.y = 0;
-    this.view.refresh();
+    this.refresh();
     this.slctRefresh(true);
   }
 
   clearFilter() {
     if (this.filterRows !== null) {
       this.filterRows = null;
-      this.view.refresh();
+      this.refresh();
       this.slctRefresh(false);
     }
   }
@@ -448,7 +560,7 @@ class Sheet extends BaseElement {
     this._slctRafId = requestAnimationFrame(() => {
       this._slctRafId = null;
       this.slctClear();
-      this.view.scrollbarRefresh();
+      scrollbarRefresh(this);
       if (focus) this.slctFocus();
 
       const r = this.rangeOrdered();
@@ -466,7 +578,7 @@ class Sheet extends BaseElement {
           }
         }
       }
-      this.view.footerUpdate();
+      footerUpdate(this);
     });
   }
 
@@ -482,7 +594,7 @@ class Sheet extends BaseElement {
         if (e.deltaY > 0) this.nViewCols++;
         else if (e.deltaY < 0 && this.nViewCols > minCols) this.nViewCols--;
       }
-      this.view.reload();
+      this.reload();
       return;
     }
     const step = (d) => d > 0 ? Math.floor(d / 16) : Math.ceil(d / 16);
@@ -492,11 +604,11 @@ class Sheet extends BaseElement {
       this.baseX += step(e.deltaX);
       this.baseY += step(e.deltaY);
     }
-    this.view.refresh();
+    this.refresh();
     this.slctRefresh(false);
   }
 
-  // --- Inline Cell Editing & Mutations ---
+  // --- Inline Cell Editing, Clipboard & Mutations ---
 
   input(txt) {
     if (this.df?.lock) return;
@@ -515,11 +627,29 @@ class Sheet extends BaseElement {
     const val = this.inputField.value.replaceAll('\u25BE', '\n');
     if (!this.escape) {
       this.rangeEdit(val);
-      if (!this.rangeEnd) this.view.loadCell(this.inputField.parentNode, this.x, this.y);
-      else this.view.refresh();
+      if (!this.rangeEnd) this.loadCell(this.inputField.parentNode, this.x, this.y);
+      else this.refresh();
     }
     this.escape = false;
     this.inputField.remove();
+  }
+
+  copySelection() {
+    return new CsvSerializer({ delimiter: '\t' }).serialize(this.rangeArray());
+  }
+
+  cutSelection() {
+    if (this.df?.lock) return '';
+    const text = this.copySelection();
+    this.deleteSelection();
+    return text;
+  }
+
+  pasteText(rawText) {
+    if (!rawText || this.df?.lock) return;
+    const delimiter = rawText.includes('\t') ? '\t' : SeparatorDetector.detect(rawText);
+    const matrix = new CsvParser({ delimiter, trimUnquotedWhitespace: Boolean(stg?.trim_unquoted) }).parse(rawText);
+    if (matrix?.length > 0) this.paste(matrix);
   }
 
   insertDate() {
@@ -532,7 +662,7 @@ class Sheet extends BaseElement {
       this.inputField.selectionStart = this.inputField.selectionEnd = start + todayStr.length;
     } else {
       this.rangeEdit(todayStr);
-      this.view.refresh();
+      this.refresh();
     }
   }
 
@@ -542,7 +672,7 @@ class Sheet extends BaseElement {
 
   deleteSelection() {
     this.rangeEdit('');
-    this.view.refresh();
+    this.refresh();
   }
 
   deleteRows() {
@@ -553,7 +683,7 @@ class Sheet extends BaseElement {
       this.rangeEnd.y = r.ymin;
       if (this.rangeEnd.x === this.x) this.rangeEnd = undefined;
     }
-    this.view.refresh();
+    this.refresh();
     this.slctRefresh(false);
   }
 
@@ -565,19 +695,19 @@ class Sheet extends BaseElement {
       this.rangeEnd.x = r.xmin;
       if (this.rangeEnd.y === this.y) this.rangeEnd = undefined;
     }
-    this.view.refresh();
+    this.refresh();
     this.slctRefresh(false);
   }
 
-  undo() { this.df.undo(); this.view.refresh(); }
-  redo() { this.df.redo(); this.view.refresh(); }
-  toggleFixTop() { this.fixTop = !this.fixTop; this.view.refresh(); }
-  trim() { this.df.trimAll(); this.view.refresh(); }
+  undo() { this.df.undo(); this.refresh(); }
+  redo() { this.df.redo(); this.refresh(); }
+  toggleFixTop() { this.fixTop = !this.fixTop; this.refresh(); }
+  trim() { this.df.trimAll(); this.refresh(); }
 
   expand() {
     if (this.rangeEnd) {
       this.df.fillSeries(this.rangeOrdered());
-      this.view.refresh();
+      this.refresh();
     }
   }
 
@@ -598,7 +728,7 @@ class Sheet extends BaseElement {
       this._y = Math.max(0, this._y + dy);
       this.rangeEnd = end;
     }
-    this.view.refresh();
+    this.refresh();
     this.slctRefresh();
   }
 
@@ -607,7 +737,7 @@ class Sheet extends BaseElement {
     else if (direction === 1) { this.df.insertCol(this.x + 1); }
     else if (direction === 2) { this.df.insertRow(this.y + 1); }
     else if (direction === 3) { this.df.insertCol(this.x); this.x++; }
-    this.view.refresh();
+    this.refresh();
     this.slctRefresh();
   }
 
@@ -619,80 +749,52 @@ class Sheet extends BaseElement {
         Math.min(this.y, Math.max(0, this.df.width - 1)),
         Math.min(this.x, Math.max(0, this.df.height - 1))
       );
-      this.view.scrollbarRefresh();
-      this.view.refresh();
+      scrollbarRefresh(this);
+      this.refresh();
       return;
     }
     const r = this.rangeOrdered();
     this.df.transpose(r);
     this.rangeEnd = { x: r.xmin + (r.ymax - r.ymin), y: r.ymin + (r.xmax - r.xmin) };
-    this.view.refresh();
+    this.refresh();
   }
 
   round(integer = true) {
     this.df.roundRange(this.rangeOrdered(), integer);
-    this.view.refresh();
+    this.refresh();
   }
 
   paste(mat) {
     const r = this.rangeOrdered();
     this.df.pasteMatrix(r.xmin, r.ymin, mat);
-    this.view.refresh();
+    this.refresh();
   }
 
-  sort(n, ascending) {
+  sort(n = this.x, ascending = true) {
     this.df.sort(n, {
       ascending,
       hasHeader: Boolean(stg.sort_header),
       numbersFirst: Boolean(stg.sort_num_first)
     });
-    this.view.refresh();
+    this.refresh();
   }
-
-  sortAscending() { this.sort(this.x, true); }
-  sortDescending() { this.sort(this.x, false); }
 
   find(advanced = false) {
     this.finder.findMenu(this.df.get(this.x, this.y), advanced);
-    if (!advanced) this.view.scrollbarRefresh();
+    if (!advanced) scrollbarRefresh(this);
   }
 
   go_to_occurrence(forward = true) {
     if (!this.df || this.df.width === 0 || this.df.height === 0) return;
-    const next = new SearchEngine().goToMatching(this.df, { x: this.x, y: this.y }, forward ? 1 : -1);
+    const next = this.df.goToMatching({ x: this.x, y: this.y }, forward ? 1 : -1);
     if (!next) Notification.quick('No match');
     else this.focus_cell(next.x, next.y);
   }
 
-  go_to_next() { this.go_to_occurrence(true); }
-  go_to_prev() { this.go_to_occurrence(false); }
-
-  getValidationPane() {
-    return dom?.validationPane || (typeof document !== 'undefined' ? (document.getElementById('validation-pane') || document.querySelector('ui-validation-pane')) : null);
-  }
-
-  open_validation_pane() {
-    const pane = this.getValidationPane();
-    if (pane) pane.toggle ? pane.toggle() : pane.show?.();
-  }
-
-  validate_rule(ruleId) {
-    const pane = this.getValidationPane();
-    if (pane) {
-      pane.show?.();
-      pane.runRule?.(ruleId);
-    }
-  }
-
-  scrollbarRefresh() { return this.view.scrollbarRefresh(); }
-  startCoordEdit() { return this.view.startCoordEdit(); }
-  refresh() { return this.view.refresh(); }
-  reload() { return this.view.reload(); }
-
   disconnectedCallback() {
-    if (this.view?._refreshRafId && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(this.view._refreshRafId);
-      this.view._refreshRafId = null;
+    if (this._refreshRafId && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this._refreshRafId);
+      this._refreshRafId = null;
     }
     if (this._slctRafId && typeof cancelAnimationFrame === 'function') {
       cancelAnimationFrame(this._slctRafId);
@@ -704,5 +806,3 @@ class Sheet extends BaseElement {
 if (typeof customElements !== 'undefined' && !customElements.get('ui-sheet')) {
   customElements.define('ui-sheet', Sheet);
 }
-
-export { Sheet };

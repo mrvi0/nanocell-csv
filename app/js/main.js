@@ -1,18 +1,14 @@
-import { getSheet, setCsvHandle } from './appContext.js';
-import './ui/ContextMenu.js';
-import { CsvHandle } from './io/CsvHandle.js';
-import { Dataframe } from '../../core/model/Dataframe.js';
-import { AppLayout, buildMenu } from './ui/AppLayout.js';
-import { buildKeys } from './interaction/KeyboardRouter.js';
-import { Setting } from './ui/settings/Setting.js';
-import { Sheet } from './sheet/Sheet.js';
-import './ui/CommandPalette.js';
-import './ui/ValidationPane.js';
-import './ui/AboutDialog.js';
-import './ui/FinderDialog.js';
-import { Notification, showBrowserCompatibilityNotice } from './ui/Notification.js';
+import { Dataframe } from '../../core/Dataframe.js';
+import { getSheet, setCsvHandle, Setting, env } from './state.js';
+import { AppLayout, buildMenu } from './AppLayout.js';
+import { cmd, buildKeys } from './Commands.js';
+import { Sheet } from './Sheet.js';
+import { CsvHandle } from './CsvHandle.js';
+import { Notification, showBrowserCompatibilityNotice } from './Notification.js';
+import './Dialogs.js';
+import './SheetOverlays.js';
+import './ValidationPane.js';
 import { registerSW } from 'virtual:pwa-register';
-import { env } from './utils/misc.js';
 
 window.addEventListener('beforeunload', (e) => {
   const currentSheet = getSheet();
@@ -25,7 +21,7 @@ export function nanocell_cleanStart() {
   Setting.init();
   AppLayout.init();
   Setting.runAll();
-  buildMenu();
+  buildMenu(cmd);
   buildKeys();
   new Sheet(new Dataframe([['Hello World']]));
   csvHandle.initListeners();

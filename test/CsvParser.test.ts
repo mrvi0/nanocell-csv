@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { CsvParser } from '../core/csv/CsvParser.js';
+import { CsvParser } from '../core/Csv.js';
 
 export function runCsvParserTests(): { passed: number; failed: number } {
   let passed = 0;
@@ -492,7 +492,7 @@ export function runCsvParserTests(): { passed: number; failed: number } {
   return { passed, failed };
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`) {
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
   const result = runCsvParserTests();
   process.exit(result.failed > 0 ? 1 : 0);
 }

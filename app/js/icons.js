@@ -1,6 +1,6 @@
 let iconModules = {};
 try {
-  iconModules = import.meta.glob('../../icons/*.svg', {
+  iconModules = import.meta.glob('../icons/*.svg', {
     eager: true,
     import: 'default'
   });
@@ -9,10 +9,8 @@ try {
 const iconMap = new Map();
 
 for (const [path, url] of Object.entries(iconModules)) {
-  // path is e.g. '../../icons/edit.svg' or '../../icons/menu/save.svg'
-  const rel = path.replace(/^\.\.\/\.\.\/icons\//, ''); // 'edit.svg' or 'menu/save.svg'
-  const name = rel.replace(/\.svg$/, ''); // 'edit' or 'menu/save'
-
+  const rel = path.replace(/^\.\.\/icons\//, '');
+  const name = rel.replace(/\.svg$/, '');
   iconMap.set(rel, url);
   iconMap.set(name, url);
   iconMap.set(`icn/${rel}`, url);
@@ -20,7 +18,6 @@ for (const [path, url] of Object.entries(iconModules)) {
   iconMap.set(`/app/icn/${rel}`, url);
 }
 
-// Common semantic aliases
 if (iconMap.has('on')) {
   iconMap.set('check', iconMap.get('on'));
   iconMap.set('accept', iconMap.get('on'));
@@ -31,12 +28,6 @@ if (iconMap.has('off')) {
   iconMap.set('close', iconMap.get('off'));
 }
 
-/**
- * Returns the resolved URL or data URI for an icon.
- * Supports names like 'edit', 'save', 'lock', as well as legacy paths like 'menu/save' or 'icn/edit.svg'.
- * @param {string} name
- * @returns {string}
- */
 export function getIconUrl(name) {
   if (!name) return '';
   let clean = name.trim().replace(/^url\(["']?|["']?\)$/g, '');
@@ -48,20 +39,24 @@ export function getIconUrl(name) {
   return iconMap.get(name) || name;
 }
 
-/**
- * Directly sets the --icon-url CSS property on an element.
- * @param {HTMLElement} element
- * @param {string} iconName
- */
 export function setIcon(element, iconName) {
-  if (!element || !element.style) return;
+  if (!element?.style) return;
   const url = getIconUrl(iconName);
   if (url) {
     element.style.setProperty('--icon-url', `url("${url}")`);
-    if (element.dataset) {
-      element.dataset.icon = iconName;
-    }
+    if (element.dataset) element.dataset.icon = iconName;
   }
+}
+
+export function escapeHtml(str) {
+  if (typeof str !== 'string') str = String(str ?? '');
+  if (!/[&<>"']/.test(str)) return str;
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 export { iconMap };

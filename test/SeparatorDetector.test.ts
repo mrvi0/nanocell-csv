@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { SeparatorDetector } from '../core/csv/SeparatorDetector.js';
+import { SeparatorDetector } from '../core/Csv.js';
 
 export function runSeparatorDetectorTests(): { passed: number; failed: number } {
   let passed = 0;
@@ -89,7 +89,7 @@ export function runSeparatorDetectorTests(): { passed: number; failed: number } 
   return { passed, failed };
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`) {
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
   const result = runSeparatorDetectorTests();
   process.exit(result.failed > 0 ? 1 : 0);
 }

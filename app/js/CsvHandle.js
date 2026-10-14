@@ -1,9 +1,8 @@
-import { Dataframe } from '../../../core/model/Dataframe.js';
-import { getSheet } from '../appContext.js';
-import { Notification, showBrowserCompatibilityNotice } from '../ui/Notification.js';
-import { Sheet } from '../sheet/Sheet.js';
-import { stg } from '../ui/settings/Setting.js';
-import { CsvSerializer } from '../../../core/csv/CsvSerializer.js';
+import { Dataframe } from '../../core/Dataframe.js';
+import { CsvSerializer } from '../../core/Csv.js';
+import { getSheet, stg } from './state.js';
+import { Notification, showBrowserCompatibilityNotice } from './Notification.js';
+import { Sheet } from './Sheet.js';
 import CsvWorker from './csv_worker.js?worker';
 
 class CsvHandle {

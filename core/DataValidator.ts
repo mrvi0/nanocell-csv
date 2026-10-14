@@ -1,11 +1,10 @@
 /**
- * @file core/validation/DataValidator.ts
- * Unified tabular data, header, and date validator with declarative cell transforms.
+ * @file core/DataValidator.ts
+ * Unified tabular data, header, and calendar date validator with declarative cell transforms.
  * ZERO browser/DOM imports.
  */
 
-import { Dataframe } from '../model/Dataframe.js';
-import { parseDateCandidate, parseYearFirstDate } from '../utils/date.js';
+import { Dataframe } from './Dataframe.js';
 
 export interface ValidationProposal {
   readonly x: number;
@@ -18,6 +17,35 @@ export interface ValidationProposal {
 export interface ValidationRunResult {
   readonly proposals: ValidationProposal[];
   readonly reason?: 'coexistence' | 'ambiguous' | 'no_dates';
+}
+
+export function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1) return false;
+  const isLeap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
+}
+
+export function parseDateCandidate(rawVal: unknown): { p1: number; p2: number; year: number; raw: string } | null {
+  if (rawVal === undefined || rawVal === null) return null;
+  const raw = String(rawVal).trim();
+  const m = raw.match(/^(\d{1,2})[^0-9a-zA-Z]+(\d{1,2})[^0-9a-zA-Z]+(\d{4})$/);
+  if (!m) return null;
+
+  const p1 = parseInt(m[1], 10), p2 = parseInt(m[2], 10), year = parseInt(m[3], 10);
+  if (p1 < 1 || p1 > 31 || p2 < 1 || p2 > 31 || year < 1 || (p1 > 12 && p2 > 12)) return null;
+  if ((p1 > 12 && !isValidCalendarDate(year, p2, p1)) || (p2 > 12 && !isValidCalendarDate(year, p1, p2))) return null;
+  return { p1, p2, year, raw };
+}
+
+export function parseYearFirstDate(rawVal: unknown): { year: number; month: number; day: number; raw: string } | null {
+  if (rawVal === undefined || rawVal === null) return null;
+  const raw = String(rawVal).trim();
+  const m = raw.match(/^(\d{4})[^0-9a-zA-Z]+(\d{1,2})[^0-9a-zA-Z]+(\d{1,2})$/);
+  if (!m) return null;
+
+  const year = parseInt(m[1], 10), month = parseInt(m[2], 10), day = parseInt(m[3], 10);
+  return isValidCalendarDate(year, month, day) ? { year, month, day, raw } : null;
 }
 
 const isNum = (s: string) => Number.isFinite(Number(s));
@@ -80,9 +108,7 @@ export class DataValidator {
       const base = (oldValue || `col_${x + 1}`).toLowerCase().replace(/[^a-z0-9]/g, '_');
       let candidate = base;
       let suffix = 1;
-      while (seen.has(candidate)) {
-        candidate = `${base}_c${x + suffix++}`;
-      }
+      while (seen.has(candidate)) candidate = `${base}_c${x + suffix++}`;
       seen.add(candidate);
       if (candidate !== oldValue) {
         proposals.push({ x, y: 0, oldValue, newValue: candidate, status: 'pending' });
@@ -94,8 +120,7 @@ export class DataValidator {
   static validateDates(dataframe: Dataframe): ValidationRunResult {
     const yfList: { x: number; y: number; year: number; month: number; day: number; raw: string }[] = [];
     const ylList: { x: number; y: number; p1: number; p2: number; year: number; raw: string }[] = [];
-    let dayFirst = 0;
-    let monthFirst = 0;
+    let dayFirst = 0, monthFirst = 0;
 
     const rows = dataframe.data;
     const height = Math.min(dataframe.height, rows.length);
@@ -129,9 +154,7 @@ export class DataValidator {
     const proposals: ValidationProposal[] = [];
     for (const c of yfList) {
       const newValue = fmtIsoDate(c.year, c.month, c.day);
-      if (c.raw !== newValue) {
-        proposals.push({ x: c.x, y: c.y, oldValue: c.raw, newValue, status: 'pending' });
-      }
+      if (c.raw !== newValue) proposals.push({ x: c.x, y: c.y, oldValue: c.raw, newValue, status: 'pending' });
     }
 
     let reason: 'coexistence' | 'ambiguous' | undefined;
@@ -144,9 +167,7 @@ export class DataValidator {
         const isDayFirst = dayFirst > 0;
         for (const c of ylList) {
           const newValue = fmtIsoDate(c.year, isDayFirst ? c.p2 : c.p1, isDayFirst ? c.p1 : c.p2);
-          if (c.raw !== newValue) {
-            proposals.push({ x: c.x, y: c.y, oldValue: c.raw, newValue, status: 'pending' });
-          }
+          if (c.raw !== newValue) proposals.push({ x: c.x, y: c.y, oldValue: c.raw, newValue, status: 'pending' });
         }
       }
     }

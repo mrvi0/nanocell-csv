@@ -1,7 +1,7 @@
 /**
- * @file core/model/Dataframe.ts
+ * @file core/Dataframe.ts
  * Authoritative 2D tabular data store directly managing string[][] cell memory.
- * Incorporates cell/range utilities, transactional history, atomic batch operations,
+ * Incorporates cell/range utilities, transactional history, search/replace, sort/filter,
  * and undo/redo stacks with zero browser/DOM dependencies.
  */
 
@@ -38,6 +38,20 @@ export interface CellChange {
   newValue: string;
 }
 
+export interface SearchQuery {
+  readonly term: string;
+  readonly caseSensitive?: boolean;
+  readonly useRegex?: boolean;
+  readonly matchWholeCell?: boolean;
+  readonly scopeRange?: CellRange;
+}
+
+export interface SearchMatch {
+  readonly x: number;
+  readonly y: number;
+  readonly value: string;
+}
+
 export function isNumeric(val: unknown): boolean {
   if (typeof val === 'number') return Number.isFinite(val);
   if (typeof val !== 'string') return false;
@@ -49,6 +63,10 @@ export function isUrl(val: unknown): boolean {
   if (typeof val !== 'string' || val.length < 8) return false;
   const lower = val.toLowerCase();
   return lower.startsWith('https://') || lower.startsWith('http://');
+}
+
+export function isIsoDate(val: unknown): boolean {
+  return typeof val === 'string' && val.length === 10 && /^\d{4}-[01]\d-[0123]\d$/.test(val);
 }
 
 export function normalizeCellValue(val: unknown): string {
@@ -71,6 +89,14 @@ export function orderRange(r: CellRange): CellRange {
   };
 }
 
+function padRow(row: string[], width: number): void {
+  const curLen = row.length;
+  if (curLen < width) {
+    row.length = width;
+    row.fill('', curLen);
+  }
+}
+
 function expandSeries(v0: string, v1: string, count: number, hasV1: boolean): string[] {
   const isNum0 = v0 !== '' && isNumeric(v0);
   const isNum1 = hasV1 && v1 !== '' && isNumeric(v1);
@@ -87,6 +113,20 @@ function expandSeries(v0: string, v1: string, count: number, hasV1: boolean): st
   return Array.from({ length: count }, () => v0);
 }
 
+function buildSearchRegex(query: SearchQuery): RegExp | null {
+  if (!query.term) return null;
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let pattern = query.useRegex ? query.term : escape(query.term);
+  if (query.matchWholeCell) pattern = `^(?:${pattern})$`;
+  const flags = query.caseSensitive ? 'g' : 'gi';
+  try {
+    return new RegExp(pattern, flags);
+  } catch {
+    const safe = escape(query.term);
+    return new RegExp(query.matchWholeCell ? `^(?:${safe})$` : safe, flags);
+  }
+}
+
 export class Dataframe {
   public static readonly MS_DELTA = 100;
 
@@ -96,7 +136,7 @@ export class Dataframe {
 
   public undoStack: CommandDescriptor[] = [];
   public redoStack: CommandDescriptor[] = [];
-  protected _transactionStack: { description?: string; timestamp: number; commands: CommandDescriptor[] }[] = [];
+  private _txCommands: CommandDescriptor[] | null = null;
 
   constructor(initialData?: CellValue[][]) {
     if (initialData && initialData.length > 0) {
@@ -109,60 +149,22 @@ export class Dataframe {
     }
   }
 
-  get width(): number {
-    return this._data.length > 0 ? this._data[0].length : 0;
-  }
-
-  get height(): number {
-    return this._data.length;
-  }
-
+  get width(): number { return this._data.length > 0 ? this._data[0].length : 0; }
+  get height(): number { return this._data.length; }
   get isSaved(): boolean { return this._isSaved; }
   set isSaved(val: boolean) { this._isSaved = val; }
-
   get lock(): boolean { return this._isLocked; }
   set lock(val: boolean) { this._isLocked = val; }
-
   get data(): string[][] { return this._data; }
-  set data(newRows: string[][]) {
-    if (this._isLocked) return;
-    this._data = newRows && newRows.length > 0 ? newRows.map(r => [...r]) : [['']];
-    this.square();
-    this.markDirty();
-  }
 
   get(x: number, y: number): string {
     if (y < 0 || x < 0 || y >= this.height || x >= this.width) return '';
     return normalizeCellValue(this._data[y]?.[x]);
   }
 
-  set(x: number, y: number, value: CellValue): boolean {
-    if (this._isLocked || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return false;
-    const oldVal = this.get(x, y);
-    const formatted = normalizeCellValue(value);
-    const willExpand = x >= this.width || y >= this.height;
-    this.ensureCapacity(x, y);
-    this._data[y][x] = formatted;
-    if (willExpand || formatted !== oldVal) this.markDirty();
-    return true;
-  }
-
   private _applyChanges(changes: CellChange[], description?: string): void {
     if (changes.length > 0) {
-      this.create({
-        type: 'RANGE_EDIT',
-        timestamp: Date.now(),
-        payload: { changes, description }
-      });
-    }
-  }
-
-  edit(x: number, y: number, n: CellValue): void {
-    if (this.lock) return;
-    const oldValue = this.get(x, y);
-    const newValue = normalizeCellValue(n);
-    if (newValue !== oldValue) {
-      this._applyChanges([{ x, y, oldValue, newValue }]);
+      this.create({ type: 'RANGE_EDIT', timestamp: Date.now(), payload: { changes, description } });
     }
   }
 
@@ -256,14 +258,6 @@ export class Dataframe {
     this.create({ type: 'INSERT_COL', timestamp: Date.now(), payload: { index, colData: normalized } });
   }
 
-  deleteRow(n: number): string[] {
-    return this.deleteRows(n, 1)[0] ?? [];
-  }
-
-  deleteCol(n: number): string[] {
-    return this.deleteCols(n, 1)[0] ?? [];
-  }
-
   deleteRows(startIndex: number, count = 1): string[][] {
     if (this.lock || startIndex < 0 || startIndex >= this.height || count <= 0) return [];
     const actualCount = Math.min(count, this.height - startIndex);
@@ -286,81 +280,36 @@ export class Dataframe {
     return colsData;
   }
 
-  shiftRow(n: number, direction: 'up' | 'down' = 'down'): boolean {
-    if (this.lock) return false;
-    let idx = n;
-    if (direction === 'up') {
-      if (idx <= 0 || idx >= this.height) return false;
-      idx--;
-    } else {
-      if (idx < 0 || idx >= this.height) return false;
-      if (idx + 1 === this.height) {
-        this.insertRow(idx);
-        return true;
-      }
-    }
-    if (idx < 0 || idx + 1 >= this.height) return false;
-    this.create({ type: 'SHIFT_ROW', timestamp: Date.now(), payload: { index: idx } });
-    return true;
-  }
-
-  shiftCol(n: number, direction: 'left' | 'right' = 'right'): boolean {
-    if (this.lock) return false;
-    let idx = n;
-    if (direction === 'left') {
-      if (idx <= 0 || idx >= this.width) return false;
-      idx--;
-    } else {
-      if (idx < 0 || idx >= this.width) return false;
-      if (idx + 1 === this.width) {
-        this.insertCol(idx);
-        return true;
-      }
-    }
-    if (idx < 0 || idx + 1 >= this.width) return false;
-    this.create({ type: 'SHIFT_COL', timestamp: Date.now(), payload: { index: idx } });
-    return true;
-  }
-
   shiftRows(startIndex: number, count = 1, direction: 'up' | 'down' = 'down'): boolean {
-    if (this.lock || count <= 0) return false;
-    if (direction === 'up' ? (startIndex <= 0 || startIndex >= this.height) : (startIndex < 0 || startIndex + count > this.height)) return false;
-    if (count === 1) return this.shiftRow(startIndex, direction);
-    this.runTransaction(`Shift Rows ${direction}`, () => {
-      if (direction === 'up') {
-        for (let y = startIndex; y < startIndex + count; y++) this.shiftRow(y, 'up');
-      } else {
-        for (let y = startIndex + count - 1; y >= startIndex; y--) this.shiftRow(y, 'down');
-      }
-    });
+    if (this.lock || count <= 0 || startIndex < 0) return false;
+    if (direction === 'up') {
+      if (startIndex <= 0 || startIndex + count > this.height) return false;
+      this.create({ type: 'SHIFT_ROWS', timestamp: Date.now(), payload: { from: startIndex - 1, to: startIndex + count - 1 } });
+      return true;
+    }
+    if (startIndex + count > this.height) return false;
+    if (startIndex + count === this.height) {
+      if (count === 1) { this.insertRow(startIndex); return true; }
+      return false;
+    }
+    this.create({ type: 'SHIFT_ROWS', timestamp: Date.now(), payload: { from: startIndex + count, to: startIndex } });
     return true;
   }
 
   shiftCols(startIndex: number, count = 1, direction: 'left' | 'right' = 'right'): boolean {
-    if (this.lock || count <= 0) return false;
-    if (direction === 'left' ? (startIndex <= 0 || startIndex >= this.width) : (startIndex < 0 || startIndex + count > this.width)) return false;
-    if (count === 1) return this.shiftCol(startIndex, direction);
-    this.runTransaction(`Shift Cols ${direction}`, () => {
-      if (direction === 'left') {
-        for (let x = startIndex; x < startIndex + count; x++) this.shiftCol(x, 'left');
-      } else {
-        for (let x = startIndex + count - 1; x >= startIndex; x--) this.shiftCol(x, 'right');
-      }
-    });
-    return true;
-  }
-
-  order(newOrder: number[]): void {
-    if (this.lock || !Array.isArray(newOrder) || newOrder.length !== this.height) return;
-    const oldOrder = new Array<number>(newOrder.length);
-    const seen = new Set<number>();
-    for (let i = 0; i < newOrder.length; i++) {
-      const idx = newOrder[i];
-      if (!Number.isInteger(idx) || idx < 0 || idx >= this.height || seen.has(idx)) return;
-      seen.add(idx);
-      oldOrder[idx] = i;
+    if (this.lock || count <= 0 || startIndex < 0) return false;
+    if (direction === 'left') {
+      if (startIndex <= 0 || startIndex + count > this.width) return false;
+      this.create({ type: 'SHIFT_COLS', timestamp: Date.now(), payload: { from: startIndex - 1, to: startIndex + count - 1 } });
+      return true;
     }
-    this.create({ type: 'ORDER_ROWS', timestamp: Date.now(), payload: { newOrder, oldOrder } });
+    if (startIndex + count > this.width) return false;
+    if (startIndex + count === this.width) {
+      if (count === 1) { this.insertCol(startIndex); return true; }
+      return false;
+    }
+    this.create({ type: 'SHIFT_COLS', timestamp: Date.now(), payload: { from: startIndex + count, to: startIndex } });
+    return true;
   }
 
   sort(n: number, options?: SortOptions): number[] {
@@ -380,11 +329,8 @@ export class Dataframe {
       } else {
         const trimmed = val.trim();
         const num = Number(trimmed);
-        if (trimmed !== '' && !Number.isNaN(num)) {
-          numbers.push({ val: num, idx });
-        } else {
-          strings.push({ val, idx });
-        }
+        if (trimmed !== '' && !Number.isNaN(num)) numbers.push({ val: num, idx });
+        else strings.push({ val, idx });
       }
     }
 
@@ -399,17 +345,16 @@ export class Dataframe {
     for (let i = 0; i < second.length; i++) newOrder.push(second[i].idx);
     for (let i = 0; i < empty.length; i++) newOrder.push(empty[i]);
 
-    this.order(newOrder);
+    const oldOrder = new Array<number>(newOrder.length);
+    for (let i = 0; i < newOrder.length; i++) oldOrder[newOrder[i]] = i;
+    this.create({ type: 'ORDER_ROWS', timestamp: Date.now(), payload: { newOrder, oldOrder } });
     return newOrder;
   }
 
   static transpose2D<U>(grid: U[][]): U[][] {
     if (!grid || grid.length === 0 || grid[0].length === 0) return [[]];
-    const height = grid.length;
-    const width = grid[0].length;
-    return Array.from({ length: width }, (_, x) =>
-      Array.from({ length: height }, (_, y) => grid[y][x])
-    );
+    const height = grid.length, width = grid[0].length;
+    return Array.from({ length: width }, (_, x) => Array.from({ length: height }, (_, y) => grid[y][x]));
   }
 
   transpose(range?: CellRange): void {
@@ -429,15 +374,10 @@ export class Dataframe {
     }
     for (let r = 0; r < transposedSlice.length; r++) {
       for (let c = 0; c < transposedSlice[r].length; c++) {
-        const tx = ordered.xmin + c;
-        const ty = ordered.ymin + r;
-        const key = `${tx}:${ty}`;
+        const tx = ordered.xmin + c, ty = ordered.ymin + r, key = `${tx}:${ty}`;
         const existing = changesMap.get(key);
-        if (existing) {
-          existing.newValue = transposedSlice[r][c];
-        } else {
-          changesMap.set(key, { x: tx, y: ty, oldValue: this.get(tx, ty), newValue: transposedSlice[r][c] });
-        }
+        if (existing) existing.newValue = transposedSlice[r][c];
+        else changesMap.set(key, { x: tx, y: ty, oldValue: this.get(tx, ty), newValue: transposedSlice[r][c] });
       }
     }
     this._applyChanges(Array.from(changesMap.values()), 'Transpose Range');
@@ -447,24 +387,22 @@ export class Dataframe {
     if (this.lock) return;
     this.runTransaction('Trim Empty Rows/Cols', () => {
       for (let x = this.width - 1; x >= 0 && this.width > 1; x--) {
-        if (this._data.every(row => !row?.[x]?.trim())) this.deleteCol(x);
+        if (this._data.every(row => !row?.[x]?.trim())) this.deleteCols(x, 1);
       }
       for (let y = this.height - 1; y >= 0 && this.height > 1; y--) {
-        if (this._data[y]?.every(val => !val?.trim())) this.deleteRow(y);
+        if (this._data[y]?.every(val => !val?.trim())) this.deleteRows(y, 1);
       }
     });
   }
 
   executeCommand(command: CommandDescriptor, isRevert = false): void {
-    if (!command || !command.type) return;
+    if (!command?.type) return;
     const payload = command.payload || {};
     switch (command.type) {
       case 'INSERT_ROW': {
         const { index, rowData } = payload;
         if (isRevert) {
-          if (this.height > 1 && index >= 0 && index < this.height) {
-            this._data.splice(index, 1);
-          }
+          if (this.height > 1 && index >= 0 && index < this.height) this._data.splice(index, 1);
         } else {
           const targetWidth = Math.max(1, this.width);
           const row = new Array<string>(targetWidth).fill('');
@@ -480,9 +418,7 @@ export class Dataframe {
       case 'BATCH_DELETE_ROWS': {
         const { index, rowsData } = payload;
         if (isRevert) {
-          for (let i = 0; i < rowsData.length; i++) {
-            this._data.splice(index + i, 0, [...rowsData[i]]);
-          }
+          for (let i = 0; i < rowsData.length; i++) this._data.splice(index + i, 0, [...rowsData[i]]);
         } else {
           this._data.splice(index, rowsData.length);
         }
@@ -521,26 +457,24 @@ export class Dataframe {
         this.markDirty();
         break;
       }
-      case 'SHIFT_ROW': {
-        const index = payload.index;
-        if (index >= 0 && index < this.height - 1) {
-          const temp = this._data[index];
-          this._data[index] = this._data[index + 1];
-          this._data[index + 1] = temp;
+      case 'SHIFT_ROWS': {
+        const src = isRevert ? payload.to : payload.from;
+        const dst = isRevert ? payload.from : payload.to;
+        const [row] = this._data.splice(src, 1);
+        if (row) {
+          this._data.splice(dst, 0, row);
           this.markDirty();
         }
         break;
       }
-      case 'SHIFT_COL': {
-        const index = payload.index;
-        if (index >= 0 && index < this.width - 1) {
-          for (let y = 0; y < this.height; y++) {
-            const temp = this._data[y][index];
-            this._data[y][index] = this._data[y][index + 1];
-            this._data[y][index + 1] = temp;
-          }
-          this.markDirty();
+      case 'SHIFT_COLS': {
+        const src = isRevert ? payload.to : payload.from;
+        const dst = isRevert ? payload.from : payload.to;
+        for (let y = 0; y < this.height; y++) {
+          const [col] = this._data[y].splice(src, 1);
+          this._data[y].splice(dst, 0, col ?? '');
         }
+        this.markDirty();
         break;
       }
       case 'ORDER_ROWS': {
@@ -591,64 +525,35 @@ export class Dataframe {
     }
   }
 
-  beginTransaction(description?: string): void {
-    this._transactionStack.push({ description, timestamp: Date.now(), commands: [] });
-  }
-
-  commitTransaction(): void {
-    if (this._transactionStack.length === 0) return;
-    const tx = this._transactionStack.pop()!;
-    if (tx.commands.length === 0) return;
-
-    if (this._transactionStack.length > 0) {
-      this._transactionStack[this._transactionStack.length - 1].commands.push(...tx.commands);
-      return;
-    }
-
-    const allRangeEdits = tx.commands.every(c => c.type === 'RANGE_EDIT');
-    const committedCommand: CommandDescriptor = allRangeEdits
-      ? {
-          type: 'RANGE_EDIT',
-          timestamp: tx.timestamp,
-          payload: { changes: tx.commands.flatMap(c => c.payload.changes), description: tx.description }
-        }
-      : {
-          type: 'TRANSACTION',
-          timestamp: tx.timestamp,
-          payload: { description: tx.description, commands: tx.commands }
-        };
-
-    this.undoStack.push(committedCommand);
-    this.redoStack = [];
-    this.isSaved = false;
-  }
-
-  rollbackTransaction(): void {
-    if (this._transactionStack.length === 0) return;
-    const tx = this._transactionStack.pop()!;
-    for (let i = tx.commands.length - 1; i >= 0; i--) {
-      this.executeCommand(tx.commands[i], true);
-    }
-  }
-
   runTransaction<T>(description: string, fn: () => T): T {
-    this.beginTransaction(description);
+    const prev = this._txCommands;
+    const commands: CommandDescriptor[] = [];
+    this._txCommands = commands;
     try {
-      const result = fn();
-      this.commitTransaction();
-      return result;
+      const res = fn();
+      this._txCommands = prev;
+      if (commands.length > 0) {
+        if (prev) prev.push(...commands);
+        else {
+          this.undoStack.push({ type: 'TRANSACTION', timestamp: Date.now(), payload: { description, commands } });
+          this.redoStack = [];
+          this.isSaved = false;
+        }
+      }
+      return res;
     } catch (err) {
-      this.rollbackTransaction();
+      this._txCommands = prev;
+      for (let i = commands.length - 1; i >= 0; i--) this.executeCommand(commands[i], true);
       throw err;
     }
   }
 
   create(cmd: CommandDescriptor): void {
     if (this.lock || !cmd || typeof cmd !== 'object' || !cmd.type) return;
-    if (cmd.timestamp === undefined) cmd.timestamp = Date.now();
+    cmd.timestamp ??= Date.now();
     this.executeCommand(cmd, false);
-    if (this._transactionStack.length > 0) {
-      this._transactionStack[this._transactionStack.length - 1].commands.push(cmd);
+    if (this._txCommands) {
+      this._txCommands.push(cmd);
     } else {
       this.undoStack.push(cmd);
       this.redoStack = [];
@@ -689,21 +594,11 @@ export class Dataframe {
       if (rows[i].length > targetWidth) targetWidth = rows[i].length;
     }
     if (targetWidth > this.width) {
-      for (let i = 0; i < this._data.length; i++) {
-        const curLen = this._data[i].length;
-        if (curLen < targetWidth) {
-          this._data[i].length = targetWidth;
-          this._data[i].fill('', curLen);
-        }
-      }
+      for (let i = 0; i < this._data.length; i++) padRow(this._data[i], targetWidth);
     }
     for (let i = 0; i < rows.length; i++) {
       const copy = rows[i].slice(0, targetWidth).map(normalizeCellValue);
-      const curLen = copy.length;
-      if (curLen < targetWidth) {
-        copy.length = targetWidth;
-        copy.fill('', curLen);
-      }
+      padRow(copy, targetWidth);
       this._data.push(copy);
     }
     if (!this.lock) this.markDirty();
@@ -726,33 +621,19 @@ export class Dataframe {
     for (let i = 0; i < this._data.length; i++) {
       if (this._data[i].length > maxWidth) maxWidth = this._data[i].length;
     }
-    for (let i = 0; i < this._data.length; i++) {
-      const curLen = this._data[i].length;
-      if (curLen < maxWidth) {
-        this._data[i].length = maxWidth;
-        this._data[i].fill('', curLen);
-      }
-    }
+    for (let i = 0; i < this._data.length; i++) padRow(this._data[i], maxWidth);
   }
 
   ensureCapacity(x: number, y: number): void {
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return;
     if (x >= this.width) {
       const newWidth = x + 1;
-      for (let r = 0; r < this._data.length; r++) {
-        const curLen = this._data[r].length;
-        if (curLen < newWidth) {
-          this._data[r].length = newWidth;
-          this._data[r].fill('', curLen);
-        }
-      }
+      for (let r = 0; r < this._data.length; r++) padRow(this._data[r], newWidth);
     }
     if (y >= this.height) {
       const curWidth = Math.max(1, this.width);
       const count = y + 1 - this.height;
-      for (let i = 0; i < count; i++) {
-        this._data.push(new Array(curWidth).fill(''));
-      }
+      for (let i = 0; i < count; i++) this._data.push(new Array(curWidth).fill(''));
     }
   }
 
@@ -777,6 +658,56 @@ export class Dataframe {
       if (strVal.includes(needle)) matches.push(r);
     }
     return matches;
+  }
+
+  find(query: SearchQuery): SearchMatch[] {
+    const matches: SearchMatch[] = [];
+    const regex = buildSearchRegex(query);
+    if (!regex) return matches;
+
+    const yStart = query.scopeRange ? query.scopeRange.ymin : 0;
+    const yEnd = query.scopeRange ? query.scopeRange.ymax : this.height - 1;
+    const xStart = query.scopeRange ? query.scopeRange.xmin : 0;
+    const xEnd = query.scopeRange ? query.scopeRange.xmax : this.width - 1;
+
+    for (let y = yStart; y <= yEnd; y++) {
+      for (let x = xStart; x <= xEnd; x++) {
+        const value = this.get(x, y);
+        regex.lastIndex = 0;
+        if (regex.test(value)) matches.push({ x, y, value });
+      }
+    }
+    return matches;
+  }
+
+  goToMatching(currentCoord: CellCoordinate, step: 1 | -1 = 1): CellCoordinate | null {
+    const targetVal = this.get(currentCoord.x, currentCoord.y);
+    const width = this.width, height = this.height, total = width * height;
+    if (total <= 1) return null;
+
+    let idx = currentCoord.y * width + currentCoord.x;
+    for (let i = 1; i < total; i++) {
+      idx = (idx + step + total) % total;
+      const x = idx % width;
+      const y = (idx - x) / width;
+      if ((this._data[y]?.[x] ?? '') === targetVal) return { x, y };
+    }
+    return null;
+  }
+
+  replaceAll(query: SearchQuery, replacement: string): number {
+    const regex = buildSearchRegex(query);
+    if (!regex) return 0;
+    const matches = this.find(query);
+    const changes: CellChange[] = [];
+
+    for (const { x, y, value } of matches) {
+      regex.lastIndex = 0;
+      const newValue = value.replace(regex, replacement);
+      if (newValue !== value) changes.push({ x, y, oldValue: value, newValue });
+    }
+    this._applyChanges(changes, `Replace all occurrences of '${query.term}' with '${replacement}'`);
+    return changes.length;
   }
 
   markDirty(): void {

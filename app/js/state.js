@@ -1,3 +1,138 @@
+/**
+ * @file app/js/state.js
+ * Unified application runtime context, persistent settings store (Setting / stg),
+ * environment detection, and PWA install state manager.
+ * Zero DOM component dependencies, zero circular imports.
+ */
+
+let activeSheet = null;
+let activeCsvHandle = null;
+
+export function getSheet() { return activeSheet; }
+export function setSheet(sheet) { activeSheet = sheet; }
+export function getDataframe() { return activeSheet?.df || null; }
+export function getCsvHandle() { return activeCsvHandle; }
+export function setCsvHandle(handle) { activeCsvHandle = handle; }
+export function resetContext() { activeSheet = null; activeCsvHandle = null; }
+
+// --- Persistent Settings Store ---
+
+const stg = {};
+if (typeof globalThis !== 'undefined') globalThis.stg = stg;
+
+export class Setting {
+  constructor(s) {
+    let stored = null;
+    try {
+      stored = (typeof window !== 'undefined' && typeof localStorage !== 'undefined') ? localStorage.getItem(s.key) : null;
+    } catch {}
+
+    if (stored !== null && stored !== '' && !isNaN(stored)) stored = Number(stored);
+    if (stored === 'true') stored = true;
+    if (stored === 'false') stored = false;
+    if (s.key === 'editMaxFileSize' && (stored === 100 || stored === '100')) {
+      stored = s.dflt;
+      try { localStorage?.setItem('editMaxFileSize', String(s.dflt)); } catch {}
+    }
+
+    this.key = s.key;
+    if (stored !== null) {
+      this.value = stored;
+    } else if (s.key === 'theme') {
+      const prefersDark = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+      this.value = prefersDark ? 'nord' : 'light';
+    } else {
+      this.value = s.dflt;
+    }
+    this.cb = s.cb;
+
+    Object.defineProperty(stg, this.key, {
+      get: () => this.value,
+      set: (val) => {
+        this.value = val;
+        try { localStorage?.setItem(this.key, val); } catch {}
+        this.cb?.(this.value);
+      },
+      configurable: true
+    });
+  }
+
+  static set(key, val) { stg[key] = val; }
+  static toggleActionBar() { stg.actionBar = stg.actionBar === false; }
+
+  static init() {
+    for (const s of Setting.list) if (!s.title) new Setting(s);
+    Setting.setTheme();
+  }
+
+  static setTheme(themeName) {
+    const activeTheme = themeName || globalThis.stg?.theme || 'light';
+    if (typeof document !== 'undefined') {
+      document.documentElement?.setAttribute('data-theme', activeTheme);
+      document.body?.setAttribute('data-theme', activeTheme);
+    }
+  }
+
+  static runAll() {
+    for (const s of Setting.list) if (s.key && typeof s.cb === 'function') s.cb(stg[s.key]);
+  }
+
+  static resetDefault() {
+    for (const s of Setting.list) if (s.key) stg[s.key] = s.dflt;
+  }
+}
+
+Setting.list = [
+  { title: 'Appearance' },
+  { key: 'theme', dflt: 'nord', name: 'Theme', list: ['light', 'slate', 'dark', 'solarized', 'night', 'nord', 'dracula'], hide: true, cb: Setting.setTheme },
+  { key: 'font', dflt: 13, name: 'Font Size', min: 7, max: 24, cb: n => {
+    const b = typeof document !== 'undefined' ? document.body : null;
+    if (b) {
+      b.style.setProperty('--app-font-size', `${n}px`);
+      b.style.fontSize = `${n}px`;
+    }
+  } },
+  { key: 'rows', dflt: 25, name: 'Rows', min: 10, max: 60, cb: () => getSheet()?.reload?.() },
+  { key: 'cols', dflt: 7, name: 'Cols', min: 3, max: 30, cb: () => getSheet()?.reload?.() },
+  { key: 'actionBar', dflt: true, name: 'Action Bar', cb: b => {
+    const header = typeof document !== 'undefined' && (document.getElementById('header') || document.querySelector('header'));
+    if (header) {
+      header.classList.toggle('hidden', !b);
+      header.hidden = !b;
+      header.style.display = b ? 'flex' : 'none';
+    }
+    getSheet()?.scrollbarRefresh?.();
+  } },
+  { key: 'purple', dflt: true, name: 'Warning color on line return, comma and double quote values', cb: () => getSheet()?.reload?.() },
+
+  { title: 'Csv Save' },
+  { key: 'encoding', dflt: 'utf-8', name: 'Encoding' },
+  { key: 'delimiter', dflt: ',', name: 'Delimiter', list: [',', ';', 'TAB', '|'], hide: true },
+  { key: 'save_fixed_width_size', dflt: 0, name: 'Minimum column size', min: 0, max: 100 },
+  { key: 'save_strict', dflt: false, name: 'Save-Strict (error on comma  or double quotes)' },
+
+  { title: 'Csv Open' },
+  { key: 'set_headers', dflt: true, name: 'Set headers' },
+  { key: 'trim', dflt: false, name: 'Remove empty rows and columns' },
+  { key: 'trim_unquoted', dflt: true, name: 'Trim unquoted whitespace' },
+
+  { title: 'Csv View Only' },
+  { key: 'editMaxFileSize', dflt: 10, name: 'Max editable file size (Mo)', min: 1, max: Infinity, stepMode: 'pow2' },
+  { key: 'vo_n_chunks', dflt: 8, name: 'Number of chunks loaded', min: 8, stepMode: 'pow2' },
+  { key: 'vo_n_rows', dflt: 8, name: 'Number of rows per chunk loaded', min: 8, stepMode: 'pow2' },
+
+  { title: 'Sort' },
+  { key: 'sort_header', dflt: true, name: 'Ignore 1st row (header row)' },
+  { key: 'sort_num_first', dflt: false, name: 'Numbers are sorted before text' },
+];
+
+Setting.map = new Map(Setting.list.filter(s => s.key).map(s => [s.key, s]));
+Setting.getDef = (key) => Setting.map.get(key);
+
+export { stg };
+
+// --- Environment Detection & PWA State Manager ---
+
 export const PWA_INSTALLED_KEY = 'nanocell_pwa_installed';
 
 export function detectEnvironment(overrides = {}) {
