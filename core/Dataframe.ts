@@ -73,10 +73,16 @@ export function normalizeCellValue(val: unknown): string {
 }
 
 export function roundNumericString(str: string, decimals = 2): string {
-  if (!isNumeric(str)) return str;
-  const num = Number(str);
+  if (typeof str !== 'string') return String(str ?? '');
+  const trimmed = str.trim();
+  if (!trimmed) return str;
+  const num = Number(trimmed);
   if (!Number.isFinite(num)) return str;
-  return Number(Math.round(Number(num + 'e' + decimals)) + 'e-' + decimals).toFixed(decimals);
+  const factor = 10 ** decimals;
+  const sign = num < 0 ? -1 : 1;
+  const scaled = Math.abs(num) * factor;
+  const rounded = (sign * Math.round(scaled + Number.EPSILON * scaled)) / factor;
+  return (rounded || 0).toFixed(decimals);
 }
 
 export function orderRange(r: CellRange): CellRange {

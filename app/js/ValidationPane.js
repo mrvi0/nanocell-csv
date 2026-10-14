@@ -113,18 +113,26 @@ export class ValidationPane extends BaseElement {
     });
 
     this.columnsView?.addEventListener('click', (e) => {
+      const isColSelect = this.currentRule?.mode === 'column_select';
       const btn = e.target.closest('.validation-btn');
       if (btn) {
         e.stopPropagation();
         const col = parseInt(btn.dataset.col, 10);
         if (!Number.isNaN(col)) {
-          if (btn.classList.contains('col-inspect-btn')) this.showDetail(col);
+          if (isColSelect) this.applyColumnRule(col);
+          else if (btn.classList.contains('col-inspect-btn')) this.showDetail(col);
           else this.resolveItems(this.getPendingItems(col), btn.classList.contains('col-accept-btn'));
         }
         return;
       }
       const card = e.target.closest('.validation-col-card');
-      if (card) this.showDetail(parseInt(card.dataset.col, 10));
+      if (card) {
+        const col = parseInt(card.dataset.col, 10);
+        if (!Number.isNaN(col)) {
+          if (isColSelect) this.applyColumnRule(col);
+          else this.showDetail(col);
+        }
+      }
     });
 
     this.virtualContent?.addEventListener('click', (e) => {
@@ -196,6 +204,14 @@ export class ValidationPane extends BaseElement {
     const rule = VALIDATION_RULES.find(r => r.id === ruleId);
     if (!rule) return;
 
+    if (rule.mode === 'column_select') {
+      this.currentRule = rule;
+      this.items = [];
+      this.show();
+      this.showColumnPicker();
+      return;
+    }
+
     const { proposals, reason } = DataValidator.runRule(sheet.df, ruleId);
     if (reason === 'coexistence') {
       Notification.warning("Both 'dd-mm-YYYY' and 'mm-dd-YYYY' formats coexist in the file.", 'Date Validation');
@@ -215,6 +231,54 @@ export class ValidationPane extends BaseElement {
     this.showColumns();
   }
 
+  showColumnPicker() {
+    this.init();
+    this.currentCol = this.selectedItem = null;
+    const sheet = getSheet();
+    const colCount = sheet?.df?.width || 0;
+    if (colCount === 0) return this.showRules();
+
+    this.setView('columns', this.currentRule ? this.currentRule.label : 'Select Column', 0, '', false);
+    if (!this.columnsView) return;
+
+    let html = '';
+    for (let x = 0; x < colCount; x++) {
+      html += `
+        <div class="validation-col-card" data-col="${x}">
+          <div class="validation-col-info">
+            <span class="validation-col-label">Col ${x + 1}: ${escapeHtml(this.getColHeader(x))}</span>
+          </div>
+          <div class="validation-col-actions">
+            <button class="icon validation-btn col-accept-btn" type="button" title="Apply to column ${x + 1}" aria-label="Apply to column ${x + 1}" data-icon="on" data-col="${x}"></button>
+          </div>
+        </div>
+      `;
+    }
+    this.columnsView.innerHTML = html;
+    hydrateIcons(this.columnsView);
+  }
+
+  applyColumnRule(colIndex) {
+    const sheet = getSheet();
+    if (!sheet?.df) return;
+    if (sheet.df.lock) return Notification.warning('File is in View-Only mode. Edits are disabled.', 'Validation');
+
+    if (this.currentRule?.id === 'currency') {
+      const res = DataValidator.validateCurrencyColumn(sheet.df, colIndex);
+      if (res.changedCount === 0 && !res.insertedCol) {
+        Notification.success(`No currency or number changes needed in Col ${colIndex + 1}.`, 'Validation');
+      } else {
+        sheet.refresh?.();
+        sheet.refreshSelection?.(true);
+        Notification.success(
+          `Col ${colIndex + 1}: ${res.formattedCount} number(s) formatted${res.insertedCol ? ', ISO currency column inserted' : ''}.`,
+          'Currency Validation'
+        );
+      }
+      this.showRules();
+    }
+  }
+
   handleBack() {
     if (this.view === 'detail') this.showColumns();
     else if (this.view === 'columns') this.showRules();
@@ -226,18 +290,18 @@ export class ValidationPane extends BaseElement {
     else if (this.view === 'detail' && this.currentCol !== null) this.resolveItems(this.getPendingItems(this.currentCol), accept);
   }
 
-  setView(mode, title, count = 0, scopeLabel = '') {
+  setView(mode, title, count = 0, scopeLabel = '', showBulkActions = mode !== 'rules') {
     this.view = mode;
     const isRoot = mode === 'rules';
     if (this.backBtn) this.backBtn.style.display = isRoot ? 'none' : 'inline-flex';
     if (this.titleEl) this.titleEl.textContent = title;
     if (this.countBadge) {
       this.countBadge.textContent = count;
-      this.countBadge.style.display = isRoot ? 'none' : 'inline-block';
+      this.countBadge.style.display = (!isRoot && showBulkActions) ? 'inline-block' : 'none';
     }
     for (const [btn, verb] of [[this.acceptAllBtn, 'Accept'], [this.rejectAllBtn, 'Reject']]) {
       if (!btn) continue;
-      btn.style.display = isRoot ? 'none' : 'inline-flex';
+      btn.style.display = (!isRoot && showBulkActions) ? 'inline-flex' : 'none';
       if (scopeLabel) {
         const label = `${verb} all corrections ${scopeLabel}`;
         btn.title = label;
@@ -328,7 +392,7 @@ export class ValidationPane extends BaseElement {
       if (sheet?.df) {
         if (sheet.df.lock) return Notification.warning('File is in View-Only mode. Edits are disabled.', 'Validation');
         sheet.df.applyChanges(itemsList.map(({ x, y, oldValue, newValue }) => ({ x, y, oldValue, newValue })));
-        sheet.reload?.();
+        sheet.refresh?.();
         sheet.refreshSelection?.(true);
       }
       for (const item of itemsList) item.status = 'accepted';
