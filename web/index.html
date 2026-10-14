@@ -97,9 +97,6 @@
 </head>
 
 <body>
-  <div id="standalone-pane">
-    <a id="standalone-open-btn" class="nav-button btn-install" href="/app/home.html">Open</a>
-  </div>
   <nav aria-label="Main Navigation">
     <a class="nav_element navTitleBlock" href="#"
       onclick="document.getElementById('container').scrollTo({ top: 0, behavior: 'smooth' });">
@@ -679,11 +676,10 @@
     }
 
     pwa.subscribe((state) => {
-      if (state.isStandalone || state.status === 'standalone') {
-        document.body.classList.add('is-standalone');
+      if (state.isStandalone) {
+        window.location.replace('/app/home.html');
         return;
       }
-      document.body.classList.remove('is-standalone');
 
       if (!installButton) return;
 
@@ -737,7 +733,9 @@
         if (!state.canInstall) return;
 
         const outcome = await pwa.promptInstall();
-        if (outcome === 'manual') {
+        if (outcome === 'accepted') {
+          window.location.replace('/app/home.html');
+        } else if (outcome === 'manual') {
           showWebInstallHint();
         }
       });

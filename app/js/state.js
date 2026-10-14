@@ -35,13 +35,7 @@ export class Setting {
 
     this.key = def.key;
     this.onChange = def.onChange;
-    if (stored !== null) {
-      this.value = stored;
-    } else if (def.key === 'theme') {
-      this.value = globalThis.window?.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'nord' : 'light';
-    } else {
-      this.value = def.defaultValue;
-    }
+    this.value = stored !== null ? stored : def.defaultValue;
 
     Object.defineProperty(settings, this.key, {
       get: () => this.value,
@@ -65,7 +59,7 @@ export class Setting {
   }
 
   static setTheme(themeName) {
-    const activeTheme = themeName || settings.theme || 'light';
+    const activeTheme = themeName || settings.theme || 'nord';
     const doc = globalThis.document;
     if (doc) {
       doc.documentElement?.setAttribute('data-theme', activeTheme);
@@ -88,7 +82,7 @@ export class Setting {
 
 Setting.list = [
   { title: 'Appearance' },
-  { key: 'theme', defaultValue: 'nord', name: 'Theme', list: ['light', 'slate', 'dark', 'solarized', 'night', 'nord', 'dracula'], hide: true, onChange: Setting.setTheme },
+  { key: 'theme', defaultValue: 'nord', name: 'Theme', list: ['nord', 'light', 'slate', 'dark', 'solarized', 'night', 'dracula'], hide: true, onChange: Setting.setTheme },
   { key: 'font', defaultValue: 13, name: 'Font Size', min: 7, max: 24, onChange: (fontSize) => {
     const body = globalThis.document?.body;
     if (body) {

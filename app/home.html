@@ -10,14 +10,6 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.ico" />
   <link rel="stylesheet" href="style.css">
-  <script>
-    (function() {
-      try {
-        const theme = localStorage.getItem('theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'nord' : 'light');
-        document.documentElement.setAttribute('data-theme', theme);
-      } catch (err) { console.warn('Theme preference init failed:', err); }
-    })();
-  </script>
 </head>
 
 <body id="body" class="flex-col">

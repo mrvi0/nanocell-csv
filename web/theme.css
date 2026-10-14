@@ -325,26 +325,6 @@ header {
   pointer-events: none;
 }
 
-#standalone-pane {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background-color: #ffffff;
-  z-index: 9999;
-  align-items: center;
-  justify-content: center;
-}
-
-@media (display-mode: standalone) {
-  #standalone-pane {
-    display: flex;
-  }
-}
-
-body.is-standalone #standalone-pane {
-  display: flex;
-}
-
 .web-install-hint {
   position: absolute;
   top: calc(100% + 10px);
