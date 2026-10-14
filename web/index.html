@@ -110,7 +110,7 @@
     <a class="nav_element hide_tablet" href="#about">About</a>
     <a class="nav_element hide_tablet" href="#features">Features</a>
     <div class="nav_element hide_phone" id="test-browser-nav">
-      <a class="nav-button btn-test-browser" href="/app/home.html" target="_blank" rel="noopener noreferrer">Test it in the browser</a>
+      <a class="nav-button btn-test-browser" href="/app/home.html" target="_blank">Test it in the browser</a>
     </div>
     <div class="nav_element" id="install">
       <a id="install-btn" class="nav-button btn-install" href="/app/home.html" target="_blank" rel="noopener" role="button">Install
@@ -121,7 +121,7 @@
   <main id="container">
     <header id="header">
       <h1>NanoCell CSV Viewer &amp; Editor</h1>
-      <a href="https://github.com/CedricBonjour/nanocell-csv" target="_blank" rel="noopener noreferrer" aria-label="NanoCell CSV GitHub repository">
+      <a href="https://github.com/CedricBonjour/nanocell-csv" target="_blank" aria-label="NanoCell CSV GitHub repository">
         <img src="https://img.shields.io/github/stars/CedricBonjour/nanocell-csv?style=social" alt="GitHub stars" width="100" height="20" decoding="async">
       </a>
       <div id="screenshots" class="hide_phone">
@@ -173,7 +173,7 @@
               <p>Nanocell-csv works 100% offline, your data never leaves your computer.
                 Nanocell-csv.com runs on a static server which, by design, only sends data on request but cannot register any
                 data. Don't take our word for it, check out the <a
-                  href="https://github.com/CedricBonjour/nanocell-csv" target="_blank" rel="noopener noreferrer">source code on GitHub</a>.</p>
+                  href="https://github.com/CedricBonjour/nanocell-csv" target="_blank">source code on GitHub</a>.</p>
             </div>
           </div>
           <div class="essential-card" role="button" tabindex="0" data-target="data-accuracy" onclick="if (!event.target.closest('a')) document.getElementById('data-accuracy')?.scrollIntoView({ behavior: 'smooth' });">
@@ -599,7 +599,7 @@
       <div class="doc-section-content">
         <h2 style="text-align: center; margin-bottom: 0.4em;">Contribute</h2>
         <div style="text-align: center; margin-bottom: 1.5em;">
-          <a href="https://github.com/CedricBonjour/nanocell-csv" target="_blank" rel="noopener noreferrer" style="display: inline-block;" aria-label="Star NanoCell CSV on GitHub">
+          <a href="https://github.com/CedricBonjour/nanocell-csv" target="_blank" style="display: inline-block;" aria-label="Star NanoCell CSV on GitHub">
             <img src="https://img.shields.io/github/stars/CedricBonjour/nanocell-csv?style=social" alt="GitHub stars" width="100" height="20" decoding="async">
           </a>
         </div>
@@ -613,13 +613,13 @@
           <div class="essential-card">
             <div>
               <strong>Report bugs &amp; edge cases</strong>
-              <p>Encountered a malformed CSV with non-standard line breaks, tricky escaping, or odd delimiters that breaks rendering? Help improve stability by submitting sample cases on the <a href="https://github.com/CedricBonjour/nanocell-csv/issues/new" target="_blank" rel="noopener noreferrer">GitHub issue tracker</a>.</p>
+              <p>Encountered a malformed CSV with non-standard line breaks, tricky escaping, or odd delimiters that breaks rendering? Help improve stability by submitting sample cases on the <a href="https://github.com/CedricBonjour/nanocell-csv/issues/new" target="_blank">GitHub issue tracker</a>.</p>
             </div>
           </div>
           <div class="essential-card">
             <div>
               <strong>Request features &amp; transforms</strong>
-              <p>Need a new validation rule, or a specific workflow shortcut? Open a discussion or feature request on <a href="https://github.com/CedricBonjour/nanocell-csv/issues" target="_blank" rel="noopener noreferrer">GitHub issues</a>.</p>
+              <p>Need a new validation rule, or a specific workflow shortcut? Open a discussion or feature request on <a href="https://github.com/CedricBonjour/nanocell-csv/issues" target="_blank">GitHub issues</a>.</p>
             </div>
           </div>
         </div>
@@ -630,12 +630,12 @@
         <strong>Links</strong>
         <a href="#large-files">Documentation</a>
         <a href="/terms_of_use_and_license.html">Terms of use</a>
-        <a href="https://github.com/CedricBonjour/nanocell-csv/issues/new" target="_blank" rel="noopener noreferrer">Bug report</a>
-        <a href="https://github.com/CedricBonjour/nanocell-csv" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+        <a href="https://github.com/CedricBonjour/nanocell-csv/issues/new" target="_blank">Bug report</a>
+        <a href="https://github.com/CedricBonjour/nanocell-csv" target="_blank">GitHub Repository</a>
       </div>
       <div>
         <strong>Contact</strong>
-        <a href="https://CedricBonjour.github.io/" target="_blank" rel="noopener noreferrer">About the author</a>
+        <a href="https://CedricBonjour.github.io/" target="_blank">About the author</a>
         <span>
           <a id="email">nanocell.csv@gmail.com</a>
           <code id="copy_toast"> <img src="/img/cp.svg" alt="Copy email address" width="16" height="16"> copied to clipboard</code>
@@ -658,18 +658,6 @@
     const installContainer = document.getElementById('install');
     const installButton = document.getElementById('install-btn') || installContainer?.querySelector('a, button');
     const testBrowserNav = document.getElementById('test-browser-nav');
-
-    function openAppInBrowserTab(url = '/app/home.html') {
-      window.open(url, '_blank');
-    }
-
-    // All links to /app/home.html except #install-btn and #standalone-open-btn open in a separate browser tab
-    document.querySelectorAll('a[href^="/app/home.html"]:not(#install-btn):not(#standalone-open-btn)').forEach((link) => {
-      link.addEventListener('click', (e) => {
-        e.preventDefault();
-        openAppInBrowserTab(link.getAttribute('href') || '/app/home.html');
-      });
-    });
 
     let hintTimer = null;
     function showWebInstallHint() {
