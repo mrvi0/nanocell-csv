@@ -21,15 +21,12 @@ export class Notification extends BaseElement {
       btn.title = label;
       setIcon(btn, icon);
       btn.onclick = fn;
-      btn.onkeydown = (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); fn(); }
-      };
       return btn;
     };
 
-    this.okBtn = makeBtn('ui-msg-ok', 'on', options.okText || 'Confirm', () => this.resolve(true));
-    this.cancelBtn = makeBtn('ui-msg-cancel', 'off', options.cancelText || 'Cancel', () => this.resolve(false));
-    this.closeBtn = makeBtn('ui-toast-close-btn', 'off', 'Dismiss notification', () => this.dismiss());
+    this.okBtn = makeBtn('ui-msg-ok accept-btn', 'on', options.okText || 'Confirm', () => this.resolve(true));
+    this.cancelBtn = makeBtn('ui-msg-cancel reject-btn', 'off', options.cancelText || 'Cancel', () => this.resolve(false));
+    this.closeBtn = makeBtn('ui-toast-close-btn close-btn', 'off', 'Dismiss notification', () => this.dismiss());
 
     this.keyHandler = (e) => {
       if (!this.isConnected) return;
@@ -55,7 +52,7 @@ export class Notification extends BaseElement {
 
     const isChoice = this.options.mode === 'choice';
     const type = this.options.type || (isChoice ? 'warning' : 'info');
-    this.className = `ui-toast-card ui-toast-${type}`;
+    this.className = `ui-toast-card floating-panel ui-toast-${type}`;
 
     const bodyDiv = document.createElement('div');
     bodyDiv.className = 'ui-toast-body';
@@ -70,7 +67,7 @@ export class Notification extends BaseElement {
     const hasButtons = isChoice || (this.options.mode === 'confirm' && !this.options.duration) || (!this.options.duration && (this.options.onConfirm || this.options.onCancel));
     if (hasButtons) {
       const actionsDiv = document.createElement('div');
-      actionsDiv.className = 'ui-toast-actions';
+      actionsDiv.className = 'btn-group ui-toast-actions';
       if (isChoice) actionsDiv.appendChild(this.cancelBtn);
       actionsDiv.appendChild(this.okBtn);
       bodyDiv.appendChild(actionsDiv);
@@ -85,7 +82,6 @@ export class Notification extends BaseElement {
       const progress = document.createElement('div');
       progress.className = 'ui-toast-progress';
       progress.style.setProperty('--toast-duration', `${duration}ms`);
-      progress.style.animationDuration = `${duration}ms`;
       this.appendChild(progress);
       this.timer = setTimeout(() => this.dismiss(), duration);
     }

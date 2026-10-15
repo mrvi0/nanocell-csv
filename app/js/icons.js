@@ -37,19 +37,12 @@ export function hydrateIcons(root) {
   for (const el of root.querySelectorAll('[data-icon]')) setIcon(el, el.dataset.icon);
 }
 
-export function setOpen(el, open, display = 'block') {
+export function setOpen(el, open) {
   if (!el) return;
-  el.classList?.toggle('open', open);
-  el.classList?.toggle('visible', open);
-  if (open) {
-    el.setAttribute?.('open', '');
-    el.removeAttribute?.('hidden');
-    if (el.style) el.style.display = display;
-  } else {
-    el.removeAttribute?.('open');
-    el.setAttribute?.('hidden', '');
-    if (el.style) el.style.display = 'none';
-  }
+  const isOpen = Boolean(open);
+  el.classList?.toggle('open', isOpen);
+  if (isOpen) el.setAttribute?.('open', '');
+  else el.removeAttribute?.('open');
 }
 
 export function escapeHtml(text) {

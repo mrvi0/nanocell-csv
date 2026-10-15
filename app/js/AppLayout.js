@@ -96,9 +96,9 @@ export function startCoordEdit(sheet = getSheet()) {
   footer.left.classList.add('editing');
   footer.left.innerHTML = `
     <span class="coord-editor">
-      <input type="number" class="coord-input coord-col finder-input" min="1" value="${currentCol}" aria-label="Column" title="Column" />
+      <input type="number" class="coord-input coord-col" min="1" value="${currentCol}" aria-label="Column" title="Column" />
       <span class="coord-sep">:</span>
-      <input type="number" class="coord-input coord-row finder-input" min="1" value="${currentRow}" aria-label="Row" title="Row" />
+      <input type="number" class="coord-input coord-row" min="1" value="${currentRow}" aria-label="Row" title="Row" />
       <button class="icon coord-go-btn" type="button" title="Go to cell (Enter)" aria-label="Go to cell" data-icon="arrow_right"></button>
     </span>
   `;
@@ -231,26 +231,20 @@ export function refreshScrollbars(sheet = getSheet()) {
   const showX = colCount >= sheet.viewCols - 2;
 
   scrollerY.classList.toggle('hidden', !showY);
-  scrollerY.style.display = showY ? 'block' : 'none';
   scrollerX.classList.toggle('hidden', !showX);
-  scrollerX.style.display = showX ? 'block' : 'none';
 
   const totalY = Math.max(rowCount - 1, sheet.baseY, 1);
   const totalX = Math.max(colCount - 1, sheet.baseX, 1);
 
   if (showY) {
-    const [sizeY, heightCss] = totalY < 100 ? ['lg', '50vh'] : (totalY < 1000 ? ['md', '20vh'] : ['sm', '10vh']);
-    scrollerY.setAttribute('data-size', sizeY);
-    scrollerY.style.height = heightCss;
+    scrollerY.setAttribute('data-size', totalY < 100 ? 'lg' : (totalY < 1000 ? 'md' : 'sm'));
     const boundsY = getScrollBoundsY(sheet);
     const topOffset = boundsY ? boundsY.topOffset : 0;
     const trackHeight = (boundsY ? boundsY.trackHeight : 0) - scrollerY.offsetHeight;
     scrollerY.style.top = `${topOffset + Math.round((trackHeight * sheet.baseY) / totalY)}px`;
   }
   if (showX) {
-    const [sizeX, widthCss] = totalX < 30 ? ['lg', '50vw'] : (totalX < 100 ? ['md', '20vw'] : ['sm', '10vw']);
-    scrollerX.setAttribute('data-size', sizeX);
-    scrollerX.style.width = widthCss;
+    scrollerX.setAttribute('data-size', totalX < 30 ? 'lg' : (totalX < 100 ? 'md' : 'sm'));
     const boundsX = getScrollBoundsX(sheet);
     const leftOffset = boundsX ? boundsX.leftOffset : 0;
     const trackWidth = (boundsX ? boundsX.barTrackWidth : 0) - scrollerX.offsetWidth;
@@ -269,7 +263,7 @@ export function buildMenu(commands) {
   for (const itemId of menuItems) {
     if (!itemId) {
       const spacer = document.createElement('div');
-      spacer.className = 'header-spacer grow';
+      spacer.className = 'grow';
       dom.header.appendChild(spacer);
       continue;
     }
@@ -285,7 +279,6 @@ export function buildMenu(commands) {
     setIcon(btn, iconName);
     btn.title = tooltip;
     btn.setAttribute('aria-label', tooltip);
-    btn.setAttribute('role', 'button');
     btn.addEventListener('click', () => command?.run?.());
     dom.header.appendChild(btn);
   }
@@ -305,7 +298,7 @@ export function buildMenu(commands) {
     <span>Install</span>
   `;
   installBtn.addEventListener('click', () => triggerAppInstall());
-  pwa.subscribe((state) => { installBtn.style.display = state.canInstall ? 'inline-flex' : 'none'; });
+  pwa.subscribe((state) => installBtn.classList.toggle('hidden', !state.canInstall));
   dom.header.appendChild(installBtn);
 }
 

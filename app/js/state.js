@@ -82,30 +82,22 @@ export class Setting {
 
 Setting.list = [
   { title: 'Appearance' },
-  { key: 'theme', defaultValue: 'nord', name: 'Theme', list: ['nord', 'light', 'slate', 'dark', 'solarized', 'night', 'dracula'], hide: true, onChange: Setting.setTheme },
+  { key: 'theme', defaultValue: 'nord', name: 'Theme', list: ['nord', 'light', 'slate', 'dark', 'solarized', 'night', 'dracula'], onChange: Setting.setTheme },
   { key: 'font', defaultValue: 13, name: 'Font Size', min: 7, max: 24, onChange: (fontSize) => {
-    const body = globalThis.document?.body;
-    if (body) {
-      body.style.setProperty('--app-font-size', `${fontSize}px`);
-      body.style.fontSize = `${fontSize}px`;
-    }
+    globalThis.document?.body?.style?.setProperty('--app-font-size', `${fontSize}px`);
   } },
   { key: 'rows', defaultValue: 25, name: 'Rows', min: 10, max: 60, onChange: () => getSheet()?.reload?.() },
   { key: 'cols', defaultValue: 7, name: 'Cols', min: 3, max: 30, onChange: () => getSheet()?.reload?.() },
   { key: 'actionBar', defaultValue: true, name: 'Action Bar', onChange: (isVisible) => {
     const header = globalThis.document?.getElementById?.('header') || globalThis.document?.querySelector?.('header');
-    if (header) {
-      header.classList.toggle('hidden', !isVisible);
-      header.hidden = !isVisible;
-      header.style.display = isVisible ? 'flex' : 'none';
-    }
+    header?.classList?.toggle('hidden', !isVisible);
     getSheet()?.refreshScrollbars?.();
   } },
   { key: 'highlightNonCompliant', defaultValue: true, name: 'Warning color on line return, comma and double quote values', onChange: () => getSheet()?.reload?.() },
 
   { title: 'Csv Save' },
   { key: 'encoding', defaultValue: 'utf-8', name: 'Encoding' },
-  { key: 'delimiter', defaultValue: ',', name: 'Delimiter', list: [',', ';', 'TAB', '|'], hide: true },
+  { key: 'delimiter', defaultValue: ',', name: 'Delimiter', list: [',', ';', 'TAB', '|'] },
   { key: 'fixedWidthSize', defaultValue: 0, name: 'Minimum column size', min: 0, max: 100 },
   { key: 'strictSave', defaultValue: false, name: 'Save-Strict (error on comma  or double quotes)' },
 

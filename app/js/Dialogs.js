@@ -30,18 +30,14 @@ export class DialogManager {
     this.container.appendChild(element);
 
     if (closeButton) {
-      const closeBtn = document.createElement('span');
-      closeBtn.className = 'icon';
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'icon close-btn';
       closeBtn.id = 'close-dialog';
       closeBtn.title = 'Close (Esc)';
       closeBtn.setAttribute('aria-label', 'Close');
-      closeBtn.setAttribute('role', 'button');
-      closeBtn.setAttribute('tabindex', '0');
       setIcon(closeBtn, 'off');
       closeBtn.addEventListener('click', () => this.close());
-      closeBtn.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.close(); }
-      });
       this.container.appendChild(closeBtn);
     }
   }
@@ -68,9 +64,9 @@ export class DialogManager {
 
   static handleKeyDown(event) {
     if (event.defaultPrevented || event.key !== 'Tab' || !this.container) return;
-    const selector = '.ui-list, .ui-num, .ui-bool-toggle, ui-bool, button:not([tabindex="-1"]), input:not([tabindex="-1"]), select:not([tabindex="-1"]), textarea:not([tabindex="-1"]), #close-dialog, [tabindex="0"]';
+    const selector = 'ui-list, ui-num, ui-bool, button:not([tabindex="-1"]), input:not([tabindex="-1"]), select:not([tabindex="-1"]), textarea:not([tabindex="-1"]), [tabindex="0"]';
     const focusables = Array.from(this.container.querySelectorAll(selector))
-      .filter(el => !el.disabled && el.style.display !== 'none' && !el.closest?.('.hidden'))
+      .filter(el => !el.disabled && !el.hidden && !el.closest?.('.hidden'))
       .filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
     this.cycleFocus(event, focusables);
   }
@@ -116,7 +112,6 @@ export class BoolInput extends BaseElement {
     this._initialized = true;
     this.setAttribute('tabindex', '0');
     this.setAttribute('role', 'switch');
-    this.classList.add('ui-bool-toggle');
     this.render();
 
     this.addEventListener('click', () => { this.focus(); this.setValueInternal(!this._value, true); });
@@ -150,8 +145,7 @@ export class BoolInput extends BaseElement {
 }
 
 class StepperInput extends BaseElement {
-  initStepper(className, leftIcon, leftLabel, rightIcon, rightLabel) {
-    this.classList.add(className);
+  initStepper(leftIcon, leftLabel, rightIcon, rightLabel) {
     const makeBtn = (icon, label) => {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -163,7 +157,8 @@ class StepperInput extends BaseElement {
       return btn;
     };
     this.leftBtn = makeBtn(leftIcon, leftLabel);
-    this.centerEl = document.createElement('section');
+    this.centerEl = document.createElement('span');
+    this.centerEl.className = 'truncate';
     this.rightBtn = makeBtn(rightIcon, rightLabel);
   }
 
@@ -181,16 +176,12 @@ class StepperInput extends BaseElement {
 }
 
 export class ListInput extends StepperInput {
-  constructor(optionsList = [], hideUnselected = true) {
+  constructor(optionsList = []) {
     super();
+    this.options = optionsList.map(String);
     this.selectedIndex = 0;
-    this.initStepper('ui-list', 'arrow_left', 'Previous option', 'arrow_right', 'Next option');
-    for (const item of optionsList) {
-      const span = document.createElement('span');
-      span.innerHTML = item;
-      this.centerEl.appendChild(span);
-    }
-    this.setAttribute('hide', hideUnselected);
+    this.initStepper('arrow_left', 'Previous option', 'arrow_right', 'Next option');
+    if (this.centerEl) this.centerEl.textContent = this.options[0] ?? '';
   }
 
   connectedCallback() {
@@ -204,20 +195,17 @@ export class ListInput extends StepperInput {
     this.setSelectedIndex(this.selectedIndex, false);
   }
 
-  get value() { return this.centerEl.children[this.selectedIndex]?.innerText; }
+  get value() { return this.options[this.selectedIndex]; }
   set value(val) {
-    for (let i = 0; i < this.centerEl.children.length; i++) {
-      if (this.centerEl.children[i].innerText == val) return this.setSelectedIndex(i, false);
-    }
+    const idx = this.options.indexOf(String(val));
+    if (idx !== -1) this.setSelectedIndex(idx, false);
   }
 
   setSelectedIndex(index, isUserAction = false) {
-    const length = this.centerEl.children.length;
+    const length = this.options.length;
     if (length === 0) return;
     this.selectedIndex = ((index % length) + length) % length;
-    for (let i = 0; i < length; i++) {
-      this.centerEl.children[i].setAttribute('selected', i === this.selectedIndex ? 'true' : 'false');
-    }
+    if (this.centerEl) this.centerEl.textContent = this.options[this.selectedIndex] ?? '';
     emitChange(this, isUserAction);
   }
 }
@@ -229,8 +217,8 @@ export class NumInput extends StepperInput {
     this._min = Number(min);
     this._max = Number(max);
     this.stepMode = stepMode;
-    this.initStepper('ui-num', 'remove', 'Decrease', 'add', 'Increase');
-    if (this.centerEl) this.centerEl.innerHTML = formatThousands(this._value);
+    this.initStepper('remove', 'Decrease', 'add', 'Increase');
+    if (this.centerEl) this.centerEl.textContent = formatThousands(this._value);
     this.updateButtonStates();
   }
 
@@ -263,7 +251,7 @@ export class NumInput extends StepperInput {
   setValueInternal(val, isUserAction = false) {
     if (typeof val === 'string') val = val.replace(/\s+/g, '');
     this._value = Math.max(this.min, Math.min(this.max, Number(val)));
-    if (this.centerEl) this.centerEl.innerHTML = formatThousands(this._value);
+    if (this.centerEl) this.centerEl.textContent = formatThousands(this._value);
     this.updateButtonStates();
     emitChange(this, isUserAction);
   }
@@ -279,10 +267,13 @@ export class SettingDialog {
   static buildRow(setting) {
     const row = document.createElement('div');
     row.className = 'setting-row';
-    row.innerHTML = `<div class="setting-label-container"><span class="setting-name">${setting.name}</span></div><div class="setting-control"></div>`;
+    const label = document.createElement('span');
+    label.className = 'setting-label';
+    label.textContent = setting.name;
+    row.appendChild(label);
 
     let input;
-    if (setting.list) input = new ListInput(setting.list, setting.hide);
+    if (setting.list) input = new ListInput(setting.list);
     else if (setting.stepMode) input = new NumInput(settings[setting.key] ?? setting.defaultValue, setting.min ?? 1, setting.max ?? Infinity, setting.stepMode);
     else if (setting.max) input = new NumInput(setting.defaultValue, setting.min, setting.max);
     else if (typeof setting.defaultValue === 'boolean') input = new BoolInput();
@@ -296,10 +287,10 @@ export class SettingDialog {
       };
     } else {
       input = document.createElement('span');
-      input.innerText = settings[setting.key];
+      input.textContent = settings[setting.key];
     }
 
-    row.lastElementChild.appendChild(input);
+    row.appendChild(input);
     row.addEventListener('focusin', () => row.classList.add('active'));
     row.addEventListener('focusout', (e) => { if (!row.contains(e.relatedTarget)) row.classList.remove('active'); });
     row.addEventListener('click', (e) => { if (input.focus && !input.contains(e.target)) input.focus(); });
@@ -324,21 +315,20 @@ export class SettingDialog {
       SettingDialog.show();
     };
 
-    let sectionBody = null;
+    let currentSection = null;
     for (const def of Setting.list) {
       if (def.title) {
-        const section = document.createElement('div');
-        section.className = 'settings-section';
-        section.innerHTML = `<div class="settings-section-header"><h3>${def.title}</h3></div><div class="settings-section-body"></div>`;
-        sectionBody = section.lastElementChild;
-        body.appendChild(section);
-      } else if (sectionBody) {
-        sectionBody.appendChild(SettingDialog.buildRow(def));
+        currentSection = document.createElement('div');
+        currentSection.className = 'settings-section';
+        currentSection.innerHTML = `<h3 class="settings-section-header">${def.title}</h3>`;
+        body.appendChild(currentSection);
+      } else if (currentSection) {
+        currentSection.appendChild(SettingDialog.buildRow(def));
       }
     }
 
     DialogManager.open(content, { fullscreen: true });
-    const firstInput = content.querySelector('.ui-list, .ui-num, .ui-bool-toggle');
+    const firstInput = content.querySelector('ui-list, ui-num, ui-bool');
     if (firstInput?.focus) setTimeout(() => { try { firstInput.focus(); } catch {} }, 0);
   }
 }

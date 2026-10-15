@@ -165,7 +165,7 @@ export class CsvHandle {
     const input = doc.createElement('input');
     input.type = 'file';
     input.accept = '.csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain';
-    input.style.display = 'none';
+    input.hidden = true;
     input.onchange = (event) => {
       const file = event.target?.files?.[0];
       if (file) this.loadFile(file, null);
@@ -268,7 +268,7 @@ export class CsvHandle {
       const anchor = doc.createElement('a');
       anchor.href = url;
       anchor.download = filename;
-      anchor.style.display = 'none';
+      anchor.hidden = true;
       doc.body.appendChild(anchor);
       anchor.click();
       setTimeout(() => { URL.revokeObjectURL(url); anchor.remove(); }, 100);

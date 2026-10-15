@@ -262,14 +262,7 @@ export class Sheet extends BaseElement {
         if (x === 0 || y === 0) cell.classList.add('cell-header');
         if (y === 0) cell.classList.add('col-header');
         if (x === 0) cell.classList.add('row-header');
-
-        if (y === 0 && x > 0) {
-          const headerText = document.createElement('span');
-          headerText.classList.add('noclick');
-          cell.appendChild(headerText);
-        } else if (y > 0) {
-          cell.appendChild(document.createElement('div'));
-        }
+        if (y > 0 && x > 0) cell.appendChild(document.createElement('div'));
         tr.appendChild(cell);
       }
     }
@@ -332,24 +325,18 @@ export class Sheet extends BaseElement {
     if (!cell) return;
     const colIndex = this.baseX + viewX;
     const headerText = this.fixTop ? this.df.get(colIndex, 0) : '';
-    cell.firstChild.textContent = headerText.length > 0 ? headerText : colIndex + 1;
+    cell.textContent = headerText.length > 0 ? headerText : colIndex + 1;
 
-    if (this.expandedCol != null) {
-      const isExpanded = colIndex === this.expandedCol;
-      cell.classList.toggle('col-expanded', isExpanded);
-      cell.classList.toggle('col-collapsed', !isExpanded);
-      cell.style.width = isExpanded ? '100%' : '0%';
-    } else {
-      cell.classList.remove('col-expanded', 'col-collapsed');
-      cell.style.width = `${100.0 / (this.viewCols || 10)}%`;
-    }
+    const isExpanded = this.expandedCol != null && colIndex === this.expandedCol;
+    const isCollapsed = this.expandedCol != null && colIndex !== this.expandedCol;
+    cell.classList.toggle('col-expanded', isExpanded);
+    cell.classList.toggle('col-collapsed', isCollapsed);
   }
 
   renderRowHeader(viewY, actualY) {
     const cell = this.rows[viewY + 1]?.cells[0];
     if (!cell) return;
-    const label = actualY !== undefined ? (actualY >= 0 ? String(actualY + 1) : '') : String(this.baseY + viewY + 1);
-    (cell.firstChild || cell).textContent = label;
+    cell.textContent = actualY !== undefined ? (actualY >= 0 ? String(actualY + 1) : '') : String(this.baseY + viewY + 1);
   }
 
   // --- Events & Filtering ---

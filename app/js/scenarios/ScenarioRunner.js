@@ -386,20 +386,17 @@ button.nc-scenario-hover {
 .icon.nc-scenario-hover::before {
   background-color: var(--icon-hover-color, var(--active, #3b82f6)) !important;
 }
-.validation-btn.col-accept-btn.nc-scenario-hover::before,
-.validation-btn.accept-all-btn.nc-scenario-hover::before,
-.finder-action-icon-btn.apply-btn.nc-scenario-hover::before,
-.finder-action-icon-btn.replace-all-btn.nc-scenario-hover::before {
+.accept-btn.nc-scenario-hover::before {
   background-color: var(--green, #10b981) !important;
 }
-.validation-btn.close-btn.nc-scenario-hover::before,
-.finder-action-icon-btn.close-btn.nc-scenario-hover::before {
+.reject-btn.nc-scenario-hover::before,
+.close-btn.nc-scenario-hover::before {
   background-color: var(--red, #ef4444) !important;
 }
 .validation-rule-card.nc-scenario-hover,
 .validation-col-card.nc-scenario-hover {
   border-color: var(--active, #3b82f6) !important;
-  background-color: color-mix(in srgb, var(--active, #3b82f6) 12%, var(--body-bg, #1e293b)) !important;
+  background-color: color-mix(in srgb, var(--active, #3b82f6) 12%, var(--bg2, #1e293b)) !important;
   box-shadow: 0 0 0 1px var(--active, #3b82f6);
   transform: translateX(2px);
 }
@@ -425,7 +422,6 @@ input.nc-scenario-hover {
   color: #f8fafc;
   padding: 6px 14px;
   border-radius: 8px;
-  font-family: var(--font-family-ui, sans-serif);
   font-size: 13px;
   font-weight: 500;
   display: flex;
@@ -464,20 +460,13 @@ input.nc-scenario-hover {
   width: 540px;
   max-width: calc(100vw - 24px);
   height: 74px;
-  background: var(--modal-bg, #1e293b);
-  color: var(--txt, #f8fafc);
-  border: 1px solid var(--table-borders, #334155);
   border-radius: 14px;
   padding: 8px 12px;
   display: none;
   flex-direction: column;
   justify-content: space-between;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
   z-index: 10040;
-  font-family: var(--font-family-ui, sans-serif);
   font-size: 12px;
-  user-select: none;
-  box-sizing: border-box;
 }
 .nc-scenario-hud.visible { display: flex; }
 
@@ -493,29 +482,12 @@ input.nc-scenario-hover {
   flex: 1 1 0%;
   min-width: 0;
   height: 28px;
-  background: var(--input-bg-out, rgba(148, 163, 184, 0.12));
-  color: var(--txt, inherit);
-  border: 1px solid var(--table-borders, #475569);
   border-radius: 7px;
   padding: 0 8px;
   font-family: var(--font-family-ui, sans-serif);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  outline: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.nc-hud-select:hover,
-.nc-hud-select:focus {
-  border-color: var(--active, #3b82f6);
-}
-.nc-hud-btn-group {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
 }
 .nc-scenario-hud button {
   height: 28px;
@@ -524,9 +496,6 @@ input.nc-scenario-hover {
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 .nc-scenario-hud .nc-hud-play { width: 80px; }
 .nc-scenario-hud .nc-hud-prev { width: 58px; }
@@ -541,7 +510,7 @@ input.nc-scenario-hover {
   width: 100%;
   height: 22px;
   padding-top: 4px;
-  border-top: 1px solid var(--table-borders, rgba(148, 163, 184, 0.2));
+  border-top: 1px solid var(--border, rgba(148, 163, 184, 0.2));
   flex-shrink: 0;
 }
 .nc-hud-step-counter {
@@ -561,9 +530,6 @@ input.nc-scenario-hover {
   flex: 1 1 0%;
   min-width: 0;
   color: var(--txt-soft, #94a3b8);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 12px;
   line-height: 20px;
 }
@@ -616,7 +582,7 @@ class BrowserScenarioController {
     this.keycapEl.className = 'nc-scenario-keycap';
 
     this.hudEl = document.createElement('div');
-    this.hudEl.className = 'nc-scenario-hud';
+    this.hudEl.className = 'nc-scenario-hud floating-panel';
     this.hudEl.setAttribute?.('role', 'region');
     this.hudEl.setAttribute?.('aria-label', 'Scenario Demo Controls');
 
@@ -626,8 +592,8 @@ class BrowserScenarioController {
 
     this.hudEl.innerHTML = `
       <div class="nc-hud-controls-row">
-        <select class="nc-hud-select" title="Switch scenario" aria-label="Switch scenario">${optionsHtml}</select>
-        <div class="nc-hud-btn-group">
+        <select class="nc-hud-select truncate" title="Switch scenario" aria-label="Switch scenario">${optionsHtml}</select>
+        <div class="btn-group">
           <button type="button" class="nc-hud-play" title="Replay or pause scenario">▶ Replay</button>
           <button type="button" class="nc-hud-prev" title="Previous step">&lsaquo; Step</button>
           <button type="button" class="nc-hud-next" title="Next step">Step &rsaquo;</button>
@@ -637,8 +603,8 @@ class BrowserScenarioController {
       </div>
       <div class="nc-hud-status-row">
         <span class="nc-hud-step-counter">Ready</span>
-        <span class="nc-scenario-hud-status">Select an action or press Replay</span>
-        <span class="nc-scenario-badge" style="display:none"></span>
+        <span class="nc-scenario-hud-status truncate">Select an action or press Replay</span>
+        <span class="nc-scenario-badge hidden"></span>
       </div>
     `;
 
@@ -793,12 +759,8 @@ class BrowserScenarioController {
       this.stepCounterEl.textContent = this.stepIndex > 0 ? `Step ${this.stepIndex}/${total}` : 'Ready';
     }
     if (this.badgeEl) {
-      if (this.assertionsPassed > 0) {
-        this.badgeEl.style.display = 'inline-block';
-        this.badgeEl.textContent = `✓ ${this.assertionsPassed} passed`;
-      } else {
-        this.badgeEl.style.display = 'none';
-      }
+      this.badgeEl.classList?.toggle?.('hidden', this.assertionsPassed <= 0);
+      if (this.assertionsPassed > 0) this.badgeEl.textContent = `✓ ${this.assertionsPassed} passed`;
     }
   }
 
@@ -973,8 +935,8 @@ class BrowserScenarioController {
         const cellEl = this.getCellElement(sheet, step.x, step.y);
         await this.glideAndClick(cellEl, speed, signal, 200);
         sheet.focusCell?.(step.x, step.y);
-        if (sheet.startEditing && sheet.inputField) {
-          sheet.startEditing();
+        if (sheet.startEdit && sheet.inputField) {
+          sheet.startEdit();
           sheet.inputField.value = step.value;
           this.addHoverTarget(sheet.inputField);
           await this.sleep(280 / speed, signal);

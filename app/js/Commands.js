@@ -44,7 +44,6 @@ export class CommandPalette extends BaseElement {
     this.commands = CommandPalette._defaultCommands || null;
     this.selectedIndex = 0;
     this.filteredCommands = [];
-    this.style.display = 'none';
     this._initialized = false;
   }
 
@@ -61,10 +60,10 @@ export class CommandPalette extends BaseElement {
     this.setAttribute('aria-modal', 'true');
     this.innerHTML = `
       <div class="cmd-palette-backdrop"></div>
-      <div class="cmd-palette-modal">
+      <div class="cmd-palette-modal floating-panel">
         <div class="cmd-palette-header">
           <input type="text" class="cmd-palette-input" placeholder="Type a command or search..." autofocus />
-          <span class="cmd-palette-close icon" role="button" title="Close (Esc)" aria-label="Close" data-icon="off"></span>
+          <button type="button" class="cmd-palette-close close-btn icon" title="Close (Esc)" aria-label="Close" data-icon="off"></button>
         </div>
         <ul class="cmd-palette-list" role="listbox"></ul>
         <div class="cmd-palette-footer">
@@ -89,7 +88,7 @@ export class CommandPalette extends BaseElement {
   }
 
   get isOpen() {
-    return Boolean(this.classList.contains('open') || this.hasAttribute('open') || this.style.display === 'block');
+    return Boolean(this.classList.contains('open') || this.hasAttribute('open'));
   }
 
   getCommands() {
@@ -203,7 +202,7 @@ export class CommandPalette extends BaseElement {
   open() {
     this.init();
     this.commands ||= CommandPalette._defaultCommands;
-    setOpen(this, true, 'block');
+    setOpen(this, true);
     if (this.inputEl) this.inputEl.value = '';
     this.filterCommands();
     setTimeout(() => this.inputEl?.focus(), 10);
@@ -282,9 +281,7 @@ export class ContextMenu extends BaseElement {
 
   showItems(visibleIds) {
     for (let i = 0; i < this.items.length; i++) {
-      const isVisible = visibleIds.includes(this.items[i].id);
-      this.table.rows[i].classList.toggle('hidden', !isVisible);
-      this.table.rows[i].style.display = isVisible ? 'table-row' : 'none';
+      this.table.rows[i].classList.toggle('hidden', !visibleIds.includes(this.items[i].id));
     }
   }
 
@@ -326,7 +323,7 @@ export class ContextMenu extends BaseElement {
       this.showItems(['roundInt', 'roundDec', 'insertCol', 'insertRow', 'deleteCol', 'deleteRow']);
     }
 
-    setOpen(this, true, 'block');
+    setOpen(this, true);
   }
 }
 

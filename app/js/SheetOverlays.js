@@ -9,14 +9,12 @@ import { DialogManager, NumInput } from './Dialogs.js';
 import { Notification } from './Notification.js';
 
 class FloatingToolbar extends BaseElement {
-  constructor(sheet, extraClass = '') {
+  constructor(sheet) {
     super();
     this.sheet = sheet;
     this.matchCase = false;
-    this.widget = document.createElement('div');
-    this.widget.className = `finder-widget floating-panel ${extraClass}`.trim();
-    this.appendChild(this.widget);
-    this.widget.addEventListener('keydown', (event) => {
+    this.classList.add('floating-panel');
+    this.addEventListener('keydown', (event) => {
       if (event.key === 'Tab') {
         event.stopPropagation();
         DialogManager.cycleFocus(event, this.getFocusableElements());
@@ -38,7 +36,7 @@ class FloatingToolbar extends BaseElement {
 
   showOverlay() {
     if (!this.parentNode) globalThis.document?.body?.appendChild(this);
-    setOpen(this, true, 'block');
+    setOpen(this, true);
   }
 
   hideOverlay() {
@@ -55,18 +53,18 @@ export class FinderDialog extends FloatingToolbar {
     this.currentIndex = 0;
     this.isAdvanced = false;
 
-    this.widget.innerHTML = `
-      <div class="finder-row find-row">
+    this.innerHTML = `
+      <div class="finder-row">
         <button class="finder-toggle-btn icon" type="button" title="Toggle Replace (Ctrl+Shift+F)" aria-label="Toggle Replace" data-icon="arrow_right"></button>
         <div class="finder-input-wrapper">
           <input type="text" class="finder-input find-input" placeholder="Find" aria-label="Find term" />
           <span class="finder-count-badge">No match</span>
         </div>
-        <div class="finder-btn-group">
-          <button class="finder-action-icon-btn case-btn icon" type="button" title="Match Case (Alt+C)" aria-label="Match Case" aria-pressed="false" data-icon="match_case"></button>
-          <button class="finder-action-icon-btn prev-btn icon" type="button" title="Previous Match (Shift+Enter)" aria-label="Previous Match" data-icon="arrow_up"></button>
-          <button class="finder-action-icon-btn next-btn icon" type="button" title="Next Match (Enter)" aria-label="Next Match" data-icon="arrow_down"></button>
-          <button class="finder-action-icon-btn close-btn icon" type="button" title="Close (Escape)" aria-label="Close" data-icon="off"></button>
+        <div class="btn-group">
+          <button class="case-btn icon" type="button" title="Match Case (Alt+C)" aria-label="Match Case" aria-pressed="false" data-icon="match_case"></button>
+          <button class="prev-btn icon" type="button" title="Previous Match (Shift+Enter)" aria-label="Previous Match" data-icon="arrow_up"></button>
+          <button class="next-btn icon" type="button" title="Next Match (Enter)" aria-label="Next Match" data-icon="arrow_down"></button>
+          <button class="close-btn icon" type="button" title="Close (Escape)" aria-label="Close" data-icon="off"></button>
         </div>
       </div>
       <div class="finder-row replace-row hidden">
@@ -74,23 +72,23 @@ export class FinderDialog extends FloatingToolbar {
         <div class="finder-input-wrapper">
           <input type="text" class="finder-input replace-input" placeholder="Replace" aria-label="Replace term" />
         </div>
-        <div class="finder-btn-group">
-          <button class="finder-action-icon-btn replace-all-btn icon" type="button" title="Replace All (Alt+A)" aria-label="Replace All" data-icon="find_replace"></button>
+        <div class="btn-group">
+          <button class="replace-all-btn accept-btn icon" type="button" title="Replace All (Alt+A)" aria-label="Replace All" data-icon="find_replace"></button>
         </div>
       </div>
     `;
-    hydrateIcons(this.widget);
+    hydrateIcons(this);
 
-    this.findInput = this.widget.querySelector('.find-input');
-    this.replaceInput = this.widget.querySelector('.replace-input');
-    this.matchBadge = this.widget.querySelector('.finder-count-badge');
-    this.caseBtn = this.widget.querySelector('.case-btn');
-    this.toggleBtn = this.widget.querySelector('.finder-toggle-btn');
-    this.prevBtn = this.widget.querySelector('.prev-btn');
-    this.nextBtn = this.widget.querySelector('.next-btn');
-    this.closeBtn = this.widget.querySelector('.close-btn');
-    this.replaceRow = this.widget.querySelector('.replace-row');
-    this.replaceBtn = this.widget.querySelector('.replace-all-btn');
+    this.findInput = this.querySelector('.find-input');
+    this.replaceInput = this.querySelector('.replace-input');
+    this.matchBadge = this.querySelector('.finder-count-badge');
+    this.caseBtn = this.querySelector('.case-btn');
+    this.toggleBtn = this.querySelector('.finder-toggle-btn');
+    this.prevBtn = this.querySelector('.prev-btn');
+    this.nextBtn = this.querySelector('.next-btn');
+    this.closeBtn = this.querySelector('.close-btn');
+    this.replaceRow = this.querySelector('.replace-row');
+    this.replaceBtn = this.querySelector('.replace-all-btn');
 
     this.bindCaseToggle(this.caseBtn, () => this.find(true));
     this.findInput.addEventListener('input', () => this.find());
@@ -113,7 +111,7 @@ export class FinderDialog extends FloatingToolbar {
   getFocusableElements() {
     const list = [this.toggleBtn, this.findInput, this.caseBtn, this.prevBtn, this.nextBtn, this.closeBtn];
     if (this.replaceRow && !this.replaceRow.classList.contains('hidden')) list.push(this.replaceInput, this.replaceBtn);
-    return list.filter(el => el && !el.disabled && !el.hidden && !el.classList.contains('hidden') && el.style.display !== 'none');
+    return list.filter(el => el && !el.disabled && !el.hidden && !el.classList.contains('hidden'));
   }
 
   toggleReplaceRow(show = this.replaceRow.classList.contains('hidden')) {
@@ -126,7 +124,7 @@ export class FinderDialog extends FloatingToolbar {
   }
 
   _syncMatchView() {
-    this.matchBadge.innerHTML = this.matches.length === 0 ? 'No match' : `${this.currentIndex + 1} / ${this.matches.length}`;
+    this.matchBadge.textContent = this.matches.length === 0 ? 'No match' : `${this.currentIndex + 1} / ${this.matches.length}`;
     if (this.matches.length > 0) {
       const m = this.matches[this.currentIndex];
       this.activeSheet?.focusCell(m.x, m.y);
@@ -182,40 +180,39 @@ export class FinderDialog extends FloatingToolbar {
 
 export class FilterDialog extends FloatingToolbar {
   constructor(sheet) {
-    super(sheet, 'filter-widget');
+    super(sheet);
     this._previousLock = null;
 
-    this.widget.innerHTML = `
-      <div class="finder-row filter-row filter-top-row">
-        <div class="filter-col-container"></div>
+    this.innerHTML = `
+      <div class="finder-row">
         <div class="finder-input-wrapper">
           <input type="text" class="finder-input filter-input" placeholder="Filter column..." aria-label="Filter text" />
           <span class="finder-count-badge"></span>
         </div>
       </div>
-      <div class="finder-row filter-row filter-bottom-row">
-        <span class="filter-col-title" title="Selected column header"></span>
-        <div class="finder-btn-group">
-          <button class="finder-action-icon-btn case-btn icon" type="button" title="Match Case" aria-label="Match Case" aria-pressed="false" data-icon="match_case"></button>
-          <button class="finder-action-icon-btn apply-btn icon" type="button" title="Apply Filter (Enter)" aria-label="Apply Filter" data-icon="on"></button>
-          <button class="finder-action-icon-btn close-btn icon" type="button" title="Close (Escape)" aria-label="Close" data-icon="off"></button>
+      <div class="finder-row filter-bottom-row">
+        <span class="filter-col-title truncate" title="Selected column header"></span>
+        <div class="btn-group">
+          <button class="case-btn icon" type="button" title="Match Case" aria-label="Match Case" aria-pressed="false" data-icon="match_case"></button>
+          <button class="apply-btn accept-btn icon" type="button" title="Apply Filter (Enter)" aria-label="Apply Filter" data-icon="on"></button>
+          <button class="close-btn icon" type="button" title="Close (Escape)" aria-label="Close" data-icon="off"></button>
         </div>
       </div>
     `;
-    hydrateIcons(this.widget);
+    hydrateIcons(this);
 
     this.colInput = new NumInput(1, 1, 999, 'linear');
     this.colInput.setAttribute('aria-label', 'Column number');
     this.colInput.setAttribute('title', 'Column number');
     if (!this.colInput._initialized) this.colInput.connectedCallback?.();
-    this.widget.querySelector('.filter-col-container').appendChild(this.colInput);
+    this.firstElementChild.prepend(this.colInput);
 
-    this.colTitle = this.widget.querySelector('.filter-col-title');
-    this.filterInput = this.widget.querySelector('.filter-input');
-    this.countBadge = this.widget.querySelector('.finder-count-badge');
-    this.caseBtn = this.widget.querySelector('.case-btn');
-    this.applyBtn = this.widget.querySelector('.apply-btn');
-    this.closeBtn = this.widget.querySelector('.close-btn');
+    this.colTitle = this.querySelector('.filter-col-title');
+    this.filterInput = this.querySelector('.filter-input');
+    this.countBadge = this.querySelector('.finder-count-badge');
+    this.caseBtn = this.querySelector('.case-btn');
+    this.applyBtn = this.querySelector('.apply-btn');
+    this.closeBtn = this.querySelector('.close-btn');
 
     this.bindCaseToggle(this.caseBtn, () => { if (this.filterInput.value) this.applyFilter(); });
     this.applyBtn.addEventListener('click', () => this.applyFilter());
@@ -242,7 +239,7 @@ export class FilterDialog extends FloatingToolbar {
 
   getFocusableElements() {
     return [this.colInput, this.filterInput, this.caseBtn, this.applyBtn, this.closeBtn]
-      .filter(el => el && !el.disabled && !el.hidden && el.style.display !== 'none');
+      .filter(el => el && !el.disabled && !el.hidden);
   }
 
   getColIndex() {

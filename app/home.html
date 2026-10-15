@@ -12,21 +12,19 @@
   <link rel="stylesheet" href="style.css">
 </head>
 
-<body id="body" class="flex-col">
+<body id="body">
   <header id="header"></header>
-  <div id="content" class="flex-main">
+  <div id="content">
     <div id="main-container"></div>
     <ui-validation-pane id="validation-pane"></ui-validation-pane>
   </div>
-  <footer>
-    <section id="footer">
-      <section id="footer-left">Left</section>
-      <section id="footer-center" class="flex-main">Center</section>
-      <section id="footer-right">Right</section>
-      <span id="lock" class="icon" role="img" aria-label="editing file" data-src="edit_square"></span>
-    </section>
+  <footer id="footer">
+    <div id="footer-left">Left</div>
+    <div id="footer-center" class="truncate">Center</div>
+    <div id="footer-right">Right</div>
+    <span id="lock" class="icon" role="img" aria-label="editing file" data-icon="edit_square"></span>
   </footer>
-  <section id="dialog" class="scroll"></section>
+  <div id="dialog" class="scroll"></div>
   <ui-command-palette id="palette"></ui-command-palette>
   <script type="module" src="js/main.js"></script>
 </body>

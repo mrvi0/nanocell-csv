@@ -44,14 +44,13 @@ export class ValidationPane extends BaseElement {
   connectedCallback() { this.init(); }
 
   get isOpen() {
-    return this.classList.contains('open') && this.style.display !== 'none';
+    return this.classList.contains('open');
   }
 
   init() {
     if (this._initialized) return;
     this._initialized = true;
 
-    this.classList.add('ui-validation-pane');
     this.setAttribute('role', 'region');
     this.setAttribute('aria-label', 'Validation Results');
 
@@ -59,19 +58,19 @@ export class ValidationPane extends BaseElement {
       <div class="validation-pane-header">
         <div class="validation-header-left">
           <button class="icon validation-btn back-btn" id="validation-back-btn" type="button" title="Back" aria-label="Back" data-icon="arrow_left"></button>
-          <span class="validation-pane-title" id="validation-title">Data Validation</span>
-          <span class="validation-badge" id="validation-count-badge">0</span>
+          <span class="validation-pane-title truncate" id="validation-title">Data Validation</span>
+          <span class="validation-badge hidden" id="validation-count-badge">0</span>
         </div>
-        <div class="validation-pane-action-bar">
-          <button class="icon validation-btn accept-all-btn" id="validation-accept-all-btn" type="button" title="Accept all proposed edits" aria-label="Accept all proposed edits" data-icon="done_all"></button>
-          <button class="icon validation-btn reject-all-btn" id="validation-reject-all-btn" type="button" title="Reject all proposed edits" aria-label="Reject all proposed edits" data-icon="exit"></button>
+        <div class="btn-group">
+          <button class="icon validation-btn accept-btn" id="validation-accept-all-btn" type="button" title="Accept all proposed edits" aria-label="Accept all proposed edits" data-icon="done_all"></button>
+          <button class="icon validation-btn reject-btn" id="validation-reject-all-btn" type="button" title="Reject all proposed edits" aria-label="Reject all proposed edits" data-icon="exit"></button>
           <button class="icon validation-btn close-btn" id="validation-close-btn" type="button" title="Close validation pane" aria-label="Close validation pane" data-icon="off"></button>
         </div>
       </div>
       <div class="validation-pane-content scroll" id="validation-content">
         <div class="validation-rules-view" id="validation-rules-view"></div>
-        <div class="validation-columns-view" id="validation-columns-view"></div>
-        <div class="validation-detail-view" id="validation-detail-view">
+        <div class="validation-columns-view hidden" id="validation-columns-view"></div>
+        <div class="validation-detail-view hidden" id="validation-detail-view">
           <div class="validation-virtual-spacer" id="validation-virtual-spacer">
             <div class="validation-virtual-content" id="validation-virtual-content"></div>
           </div>
@@ -121,7 +120,7 @@ export class ValidationPane extends BaseElement {
         if (!Number.isNaN(col)) {
           if (isColSelect) this.applyColumnRule(col);
           else if (btn.classList.contains('col-inspect-btn')) this.showDetail(col);
-          else this.resolveItems(this.getPendingItems(col), btn.classList.contains('col-accept-btn'));
+          else this.resolveItems(this.getPendingItems(col), btn.classList.contains('accept-btn'));
         }
         return;
       }
@@ -143,7 +142,7 @@ export class ValidationPane extends BaseElement {
       const btn = e.target.closest('.validation-btn');
       if (btn) {
         e.stopPropagation();
-        this.resolveItems([item], btn.classList.contains('item-accept-btn'));
+        this.resolveItems([item], btn.classList.contains('accept-btn'));
         return;
       }
       this.handleItemClick(item, card);
@@ -177,7 +176,7 @@ export class ValidationPane extends BaseElement {
 
   show() {
     this.init();
-    setOpen(this, true, 'flex');
+    setOpen(this, true);
   }
 
   toggle() {
@@ -246,10 +245,10 @@ export class ValidationPane extends BaseElement {
       html += `
         <div class="validation-col-card" data-col="${x}">
           <div class="validation-col-info">
-            <span class="validation-col-label">Col ${x + 1}: ${escapeHtml(this.getColHeader(x))}</span>
+            <span class="validation-col-label truncate">Col ${x + 1}: ${escapeHtml(this.getColHeader(x))}</span>
           </div>
-          <div class="validation-col-actions">
-            <button class="icon validation-btn col-accept-btn" type="button" title="Apply to column ${x + 1}" aria-label="Apply to column ${x + 1}" data-icon="on" data-col="${x}"></button>
+          <div class="btn-group">
+            <button class="icon validation-btn accept-btn col-accept-btn" type="button" title="Apply to column ${x + 1}" aria-label="Apply to column ${x + 1}" data-icon="on" data-col="${x}"></button>
           </div>
         </div>
       `;
@@ -293,24 +292,25 @@ export class ValidationPane extends BaseElement {
   setView(mode, title, count = 0, scopeLabel = '', showBulkActions = mode !== 'rules') {
     this.view = mode;
     const isRoot = mode === 'rules';
-    if (this.backBtn) this.backBtn.style.display = isRoot ? 'none' : 'inline-flex';
+    const hideBulk = isRoot || !showBulkActions;
+    this.backBtn?.classList.toggle('hidden', isRoot);
     if (this.titleEl) this.titleEl.textContent = title;
     if (this.countBadge) {
       this.countBadge.textContent = count;
-      this.countBadge.style.display = (!isRoot && showBulkActions) ? 'inline-block' : 'none';
+      this.countBadge.classList.toggle('hidden', hideBulk);
     }
     for (const [btn, verb] of [[this.acceptAllBtn, 'Accept'], [this.rejectAllBtn, 'Reject']]) {
       if (!btn) continue;
-      btn.style.display = (!isRoot && showBulkActions) ? 'inline-flex' : 'none';
+      btn.classList.toggle('hidden', hideBulk);
       if (scopeLabel) {
         const label = `${verb} all corrections ${scopeLabel}`;
         btn.title = label;
         btn.setAttribute('aria-label', label);
       }
     }
-    if (this.rulesView) this.rulesView.style.display = mode === 'rules' ? 'flex' : 'none';
-    if (this.columnsView) this.columnsView.style.display = mode === 'columns' ? 'flex' : 'none';
-    if (this.detailView) this.detailView.style.display = mode === 'detail' ? 'block' : 'none';
+    this.rulesView?.classList.toggle('hidden', mode !== 'rules');
+    this.columnsView?.classList.toggle('hidden', mode !== 'columns');
+    this.detailView?.classList.toggle('hidden', mode !== 'detail');
   }
 
   showRules() {
@@ -321,12 +321,12 @@ export class ValidationPane extends BaseElement {
 
     this.rulesView.innerHTML = VALIDATION_RULES.map(rule => `
       <div class="validation-rule-card" data-rule-id="${rule.id}">
-        <button class="icon validation-rule-icon" type="button" tabindex="-1" aria-hidden="true" data-icon="${rule.icon}"></button>
+        <span class="icon validation-rule-icon" aria-hidden="true" data-icon="${rule.icon}"></span>
         <div class="validation-rule-body">
-          <div class="validation-rule-title">${escapeHtml(rule.label)}</div>
+          <div class="validation-rule-title truncate">${escapeHtml(rule.label)}</div>
           <div class="validation-rule-desc">${escapeHtml(rule.description)}</div>
         </div>
-        <button class="icon validation-rule-nav" type="button" tabindex="-1" aria-hidden="true" data-icon="arrow_right"></button>
+        <span class="icon validation-rule-nav" aria-hidden="true" data-icon="arrow_right"></span>
       </div>
     `).join('');
     hydrateIcons(this.rulesView);
@@ -351,12 +351,12 @@ export class ValidationPane extends BaseElement {
     this.columnsView.innerHTML = groups.map(g => `
       <div class="validation-col-card" data-col="${g.x}">
         <div class="validation-col-info">
-          <span class="validation-col-label">Col ${g.x + 1}: ${escapeHtml(g.header)}</span>
+          <span class="validation-col-label truncate">Col ${g.x + 1}: ${escapeHtml(g.header)}</span>
           <span class="validation-col-count">${g.items.length}</span>
         </div>
-        <div class="validation-col-actions">
-          <button class="icon validation-btn col-accept-btn" type="button" title="Accept column ${g.x + 1}" aria-label="Accept column ${g.x + 1}" data-icon="on" data-col="${g.x}"></button>
-          <button class="icon validation-btn col-reject-btn" type="button" title="Reject column ${g.x + 1}" aria-label="Reject column ${g.x + 1}" data-icon="off" data-col="${g.x}"></button>
+        <div class="btn-group">
+          <button class="icon validation-btn accept-btn col-accept-btn" type="button" title="Accept column ${g.x + 1}" aria-label="Accept column ${g.x + 1}" data-icon="on" data-col="${g.x}"></button>
+          <button class="icon validation-btn reject-btn" type="button" title="Reject column ${g.x + 1}" aria-label="Reject column ${g.x + 1}" data-icon="off" data-col="${g.x}"></button>
           <button class="icon validation-btn col-inspect-btn" type="button" title="Inspect individual corrections" aria-label="Inspect individual corrections" data-icon="arrow_right" data-col="${g.x}"></button>
         </div>
       </div>
@@ -440,13 +440,13 @@ export class ValidationPane extends BaseElement {
       html += `
         <div class="validation-item ${this.selectedItem === item ? 'selected' : ''}" data-idx="${i}">
           <div class="validation-item-diff">
-            <span class="diff-old" title="${escapeHtml(item.oldValue)}">${this.formatValue(item.oldValue)}</span>
+            <span class="diff-old truncate" title="${escapeHtml(item.oldValue)}">${this.formatValue(item.oldValue)}</span>
             <span class="diff-arrow">&rarr;</span>
-            <span class="diff-new" title="${escapeHtml(item.newValue)}">${this.formatValue(item.newValue)}</span>
+            <span class="diff-new truncate" title="${escapeHtml(item.newValue)}">${this.formatValue(item.newValue)}</span>
           </div>
-          <div class="validation-item-actions">
-            <button class="icon validation-btn item-accept-btn" type="button" title="Accept edit" aria-label="Accept edit" data-icon="on"></button>
-            <button class="icon validation-btn item-reject-btn" type="button" title="Reject edit" aria-label="Reject edit" data-icon="off"></button>
+          <div class="btn-group">
+            <button class="icon validation-btn accept-btn" type="button" title="Accept edit" aria-label="Accept edit" data-icon="on"></button>
+            <button class="icon validation-btn reject-btn" type="button" title="Reject edit" aria-label="Reject edit" data-icon="off"></button>
           </div>
         </div>
       `;
