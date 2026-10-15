@@ -1,5 +1,5 @@
 /**
- * @file core/Dataframe.ts
+ * @file app/core/Dataframe.ts
  * Authoritative 2D tabular data store directly managing string[][] cell memory.
  * Incorporates cell/range utilities, transactional closure history, search/replace,
  * sort/filter, and undo/redo stacks with zero browser/DOM dependencies.

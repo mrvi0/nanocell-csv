@@ -11,7 +11,7 @@ import {
   bootScenarioFromHash,
 } from '../app/js/scenarios/ScenarioRunner.js';
 import { setSheet } from '../app/js/state.js';
-import { Dataframe } from '../core/Dataframe.js';
+import { Dataframe } from '../app/core/Dataframe.js';
 
 export async function runScenarioRunnerTests(): Promise<{ passed: number; failed: number }> {
   let passed = 0;

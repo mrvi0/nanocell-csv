@@ -6,7 +6,7 @@
 import { getSheet } from './state.js';
 import { BaseElement, defineEl, hydrateIcons, setOpen, escapeHtml } from './icons.js';
 import { Notification } from './Notification.js';
-import { DataValidator, VALIDATION_RULES } from '../../core/DataValidator.js';
+import { DataValidator, VALIDATION_RULES } from '../core/DataValidator.js';
 
 export { VALIDATION_RULES };
 

@@ -2,7 +2,7 @@
  * @file test/Dataframe.test.ts
  * Tests for Dataframe streaming row ingestion, lock state handling, and view-only support.
  */
-import { Dataframe } from '../core/Dataframe.js';
+import { Dataframe } from '../app/core/Dataframe.js';
 
 interface TestResult {
   passed: number;

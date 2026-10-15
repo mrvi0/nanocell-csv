@@ -1,5 +1,5 @@
 /**
- * @file core/DataValidator.ts
+ * @file app/core/DataValidator.ts
  * Unified tabular data, header, calendar date, and currency column validator with declarative rule registry.
  * ZERO browser/DOM imports.
  */

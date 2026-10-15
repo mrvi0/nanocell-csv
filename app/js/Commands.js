@@ -3,7 +3,7 @@ import { AboutDialog, SettingDialog, DialogManager } from './Dialogs.js';
 import { triggerAppInstall } from './Notification.js';
 import { dom, startCoordEdit } from './AppLayout.js';
 import { ValidationPane } from './ValidationPane.js';
-import { VALIDATION_RULES } from '../../core/DataValidator.js';
+import { VALIDATION_RULES } from '../core/DataValidator.js';
 import { BaseElement, defineEl, hydrateIcons, setOpen, escapeHtml } from './icons.js';
 
 function fuzzyScore(query, text) {

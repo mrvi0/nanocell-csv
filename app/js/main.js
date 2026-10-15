@@ -1,4 +1,4 @@
-import { Dataframe } from '../../core/Dataframe.js';
+import { Dataframe } from '../core/Dataframe.js';
 import { getSheet, setCsvHandle, Setting, env } from './state.js';
 import { AppLayout, buildMenu } from './AppLayout.js';
 import { commands, buildKeys } from './Commands.js';

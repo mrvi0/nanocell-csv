@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { CsvParser } from '../core/Csv.js';
+import { CsvParser } from '../app/core/Csv.js';
 
 export function runCsvParserTests(): { passed: number; failed: number } {
   let passed = 0;

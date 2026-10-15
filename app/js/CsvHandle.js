@@ -1,5 +1,5 @@
-import { Dataframe } from '../../core/Dataframe.js';
-import { CsvSerializer } from '../../core/Csv.js';
+import { Dataframe } from '../core/Dataframe.js';
+import { CsvSerializer } from '../core/Csv.js';
 import { getSheet, settings } from './state.js';
 import { Notification, showBrowserCompatibilityNotice } from './Notification.js';
 import { Sheet } from './Sheet.js';

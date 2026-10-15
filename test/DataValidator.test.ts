@@ -4,13 +4,13 @@
  * (Currency Column validation, extractCurrency, parseCurrencyNumber, headers, dates, and cell rules).
  */
 import assert from 'node:assert';
-import { Dataframe } from '../core/Dataframe.js';
+import { Dataframe } from '../app/core/Dataframe.js';
 import {
   DataValidator,
   VALIDATION_RULES,
   extractCurrency,
   parseCurrencyNumber
-} from '../core/DataValidator.js';
+} from '../app/core/DataValidator.js';
 
 export function runDataValidatorTests(): { passed: number; failed: number } {
   let passed = 0;

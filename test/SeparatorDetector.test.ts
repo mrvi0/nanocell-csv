@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { SeparatorDetector } from '../core/Csv.js';
+import { SeparatorDetector } from '../app/core/Csv.js';
 
 export function runSeparatorDetectorTests(): { passed: number; failed: number } {
   let passed = 0;

@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { CsvSerializer } from '../core/Csv.js';
+import { CsvSerializer } from '../app/core/Csv.js';
 
 export function runCsvSerializerTests(): { passed: number; failed: number } {
   let passed = 0;

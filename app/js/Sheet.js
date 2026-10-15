@@ -4,8 +4,8 @@
  * viewport & range selection, inline cell editing, clipboard operations, and mouse/key routing.
  */
 
-import { Dataframe, orderRange, isUrl, isIsoDate } from '../../core/Dataframe.js';
-import { CsvParser, CsvSerializer, SeparatorDetector } from '../../core/Csv.js';
+import { Dataframe, orderRange, isUrl, isIsoDate } from '../core/Dataframe.js';
+import { CsvParser, CsvSerializer, SeparatorDetector } from '../core/Csv.js';
 import { getSheet, setSheet, Setting, settings } from './state.js';
 import { BaseElement, defineEl } from './icons.js';
 import { dom, updateFooter, refreshScrollbars, getScrollBoundsY, getScrollBoundsX } from './AppLayout.js';

@@ -6,9 +6,9 @@
  * keycap callouts, constant-dimension 2-row HUD pill) and fast headless execution for automated E2E tests.
  */
 
-import { Dataframe } from '../../../core/Dataframe.js';
-import { CsvParser, SeparatorDetector } from '../../../core/Csv.js';
-import { DataValidator } from '../../../core/DataValidator.js';
+import { Dataframe } from '../../core/Dataframe.js';
+import { CsvParser, SeparatorDetector } from '../../core/Csv.js';
+import { DataValidator } from '../../core/DataValidator.js';
 import { getSheet, setSheet, Setting, settings, formatShortcut } from '../state.js';
 import { commands } from '../Commands.js';
 import { ValidationPane } from '../ValidationPane.js';

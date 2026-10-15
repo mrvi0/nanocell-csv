@@ -1,4 +1,4 @@
-import { CsvParser, SeparatorDetector } from '../../core/Csv.js';
+import { CsvParser, SeparatorDetector } from '../core/Csv.js';
 
 const CHUNK_SIZE = 500 * 1000;
 const FIRST_CHUNK_TARGET = 100;

@@ -1,5 +1,5 @@
 /**
- * @file core/Csv.ts
+ * @file app/core/Csv.ts
  * Streaming RFC 4180 CSV parser, delimiter auto-detector, and multi-format serializer
  * (CSV, TSV, JSON, Markdown) with selective quoting, strict mode, and fixed-width padding.
  * ZERO browser/DOM imports.

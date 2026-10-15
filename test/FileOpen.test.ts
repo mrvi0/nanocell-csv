@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { loadCsv, loadCsvViewOnly } from '../app/js/csvWorker.js';
 import { getSheet, setSheet } from '../app/js/state.js';
-import { Dataframe } from '../core/Dataframe.js';
+import { Dataframe } from '../app/core/Dataframe.js';
 
 if (typeof globalThis.HTMLElement === 'undefined') {
   (globalThis as any).HTMLElement = class {
